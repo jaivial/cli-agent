@@ -1,0 +1,31 @@
+{
+    "id": "f824f695-c05a-4d52-b687-d57bffdedaaf",
+    "started_at": "2026-01-24T22:03:22.980797",
+    "finished_at": "2026-01-24T22:03:27.303087",
+    "n_total_trials": 5,
+    "stats": {
+        "n_trials": 5,
+        "n_errors": 5,
+        "evals": {
+            "cli-agent__MiniMax-M2.1__terminal-bench": {
+                "n_trials": 0,
+                "n_errors": 5,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {},
+                "exception_stats": {
+                    "RuntimeError": [
+                        "gpt2-codegolf__HjyfJq5",
+                        "llm-inference-batching-scheduler__3vU7AHt",
+                        "break-filter-js-from-html__2vQWv8p",
+                        "reshard-c4-data__4c3kLWc",
+                        "write-compressor__rHEniZA"
+                    ]
+                }
+            }
+        }
+    }
+}

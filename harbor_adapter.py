@@ -7,52 +7,21 @@ on Terminal-Bench 2.0 tasks.
 Based on: https://harborframework.com/docs/running-tbench
 """
 
+import asyncio
 import json
+import logging
 import os
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-# Try to import Harbor types
-try:
-    from harbor.agents.base import BaseAgent
-    from harbor.environments.base import BaseEnvironment
-    from harbor.models.agent.context import AgentContext
-    HARBOR_AVAILABLE = True
-except ImportError as e:
-    HARBOR_AVAILABLE = False
-    print(f"Harbor import warning: {e}")
-    print("Install with: pip install harbor")
+from harbor.agents.base import BaseAgent
+from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 
 
-class CLIEnvironment:
-    """Minimal environment interface for CLI agent execution."""
-    
-    def __init__(self, workspace: Path):
-        self.workspace = workspace
-        self.executions = []
-    
-    def exec(self, command: str, timeout: int = 300) -> tuple[str, str, int]:
-        """Execute a shell command and return stdout, stderr, return code."""
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(self.workspace)
-        )
-        self.executions.append({
-            "command": command,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode
-        })
-        return result.stdout, result.stderr, result.returncode
-
-
-class CLIAgentAdapter:
+class CLIAgentAdapter(BaseAgent):
     """
     Adapter for our CLI agent (eai) to work with Harbor framework.
     
@@ -62,25 +31,57 @@ class CLIAgentAdapter:
     3. Verify task completion automatically
     
     Usage:
-        harbor run -d terminal-bench@2.0 -a cli_agent:CLIAgentAdapter --model minimax/MiniMax-M2.1
+        harbor run -d terminal-bench@2.0 -a /path/to/harbor_adapter.py:CLIAgentAdapter --model minimax/MiniMax-M2.1
     """
     
-    name = "cli-agent"
-    version = "1.0.0"
+    SUPPORTS_ATIF = False
     
-    def __init__(self, workspace: Optional[Path] = None):
-        self.workspace = workspace or Path(tempfile.mkdtemp())
-        self.agent_binary = Path("/Users/usuario/Desktop/cli-agent/bin/eai")
+    def __init__(
+        self,
+        logs_dir: Path,
+        model_name: str | None = None,
+        logger: logging.Logger | None = None,
+        agent_binary: str = "/Users/usuario/Desktop/cli-agent/bin/eai",
+        mock_mode: bool = False,
+        max_loops: int = 10,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(logs_dir, model_name, logger)
+        self.agent_binary = Path(agent_binary)
+        self.mock_mode = mock_mode
+        self.max_loops = max_loops
         self.executions = []
         
-    def setup(self, environment: BaseEnvironment) -> None:
+    @staticmethod
+    def name() -> str:
+        return "cli-agent"
+    
+    def version(self) -> str | None:
+        return "1.0.0"
+    
+    async def setup(self, environment: BaseEnvironment) -> None:
         """Initialize the agent in the given environment."""
+        self.logger.info(f"Setting up CLI agent with binary: {self.agent_binary}")
+        
         # Ensure agent binary exists
         if not self.agent_binary.exists():
             raise FileNotFoundError(f"Agent binary not found: {self.agent_binary}")
         
         # Set environment variables
-        os.environ["MINIMAX_API_KEY"] = os.environ.get("MINIMAX_API_KEY", "mock")
+        if self.mock_mode:
+            os.environ["MINIMAX_API_KEY"] = "mock"
+        elif "MINIMAX_API_KEY" not in os.environ:
+            # Try to load from config
+            config_path = Path("/Users/usuario/Desktop/cli-agent/.eai_config")
+            if config_path.exists():
+                import yaml
+                with open(config_path) as f:
+                    config = yaml.safe_load(f)
+                    if config and "minimax_api_key" in config:
+                        os.environ["MINIMAX_API_KEY"] = config["minimax_api_key"]
+        
+        self.logger.info("CLI agent setup complete")
         
     async def run(
         self,
@@ -96,13 +97,17 @@ class CLIAgentAdapter:
             environment: The execution environment
             context: Harbor context for results
         """
+        self.logger.info(f"Running task: {instruction[:100]}...")
+        
         # Build command
         cmd = [
             str(self.agent_binary),
             "agent",
-            "--mock",  # Use mock mode for testing
+            "--mock" if self.mock_mode else "",
+            "--max-loops", str(self.max_loops),
             instruction
         ]
+        cmd = [c for c in cmd if c]  # Remove empty strings
         
         # Execute
         try:
@@ -111,8 +116,8 @@ class CLIAgentAdapter:
                 capture_output=True,
                 text=True,
                 timeout=300,
-                cwd=str(self.workspace),
-                env={**os.environ, "MINIMAX_API_KEY": "mock"}
+                cwd=str(environment.workspace),
+                env={**os.environ}
             )
             
             # Record execution
@@ -121,8 +126,7 @@ class CLIAgentAdapter:
                 "instruction": instruction,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "returncode": result.returncode,
-                "success": result.returncode == 0
+                "returncode": result.returncode
             }
             self.executions.append(execution)
             
@@ -138,6 +142,8 @@ class CLIAgentAdapter:
                 # Agent ran successfully even if task didn't complete
                 context.success = True
                 
+            self.logger.info(f"Task result: success={context.success}")
+                
         except subprocess.TimeoutExpired:
             context.stderr = "Task timed out after 300 seconds"
             context.success = False
@@ -146,6 +152,7 @@ class CLIAgentAdapter:
                 "instruction": instruction,
                 "error": "timeout"
             })
+            self.logger.error("Task timed out")
         except Exception as e:
             context.stderr = str(e)
             context.success = False
@@ -154,12 +161,13 @@ class CLIAgentAdapter:
                 "instruction": instruction,
                 "error": str(e)
             })
+            self.logger.error(f"Task error: {e}")
     
     def get_trajectory(self) -> dict:
         """Return the execution trajectory for analysis."""
         return {
-            "agent": self.name,
-            "version": self.version,
+            "agent": self.name(),
+            "version": self.version(),
             "executions": self.executions,
             "total_executions": len(self.executions)
         }

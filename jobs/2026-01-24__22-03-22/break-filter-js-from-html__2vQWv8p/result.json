@@ -1,0 +1,77 @@
+{
+    "id": "0beb7eb6-3949-4c1c-a815-a2a908dec48e",
+    "task_name": "break-filter-js-from-html",
+    "trial_name": "break-filter-js-from-html__2vQWv8p",
+    "trial_uri": "file:///Users/usuario/Desktop/cli-agent/jobs/2026-01-24__22-03-22/break-filter-js-from-html__2vQWv8p",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "break-filter-js-from-html"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "b33421492e86b07de2a01bc2205f7e7d2fdc36446a84787265d99e5e138fdaaa",
+    "config": {
+        "task": {
+            "path": "break-filter-js-from-html",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "break-filter-js-from-html__2vQWv8p",
+        "trials_dir": "/Users/usuario/Desktop/cli-agent/jobs/2026-01-24__22-03-22",
+        "timeout_multiplier": 1.0,
+        "agent": {
+            "name": null,
+            "import_path": "harbor.agents.installed.eai_cli:CLIAgentAdapter",
+            "model_name": "minimax/MiniMax-M2.1",
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "kwargs": {}
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "kwargs": {}
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "job_id": "f824f695-c05a-4d52-b687-d57bffdedaaf"
+    },
+    "agent_info": {
+        "name": "cli-agent",
+        "version": "1.0.0",
+        "model_info": {
+            "name": "MiniMax-M2.1",
+            "provider": "minimax"
+        }
+    },
+    "agent_result": null,
+    "verifier_result": null,
+    "exception_info": {
+        "exception_type": "RuntimeError",
+        "exception_message": "Docker compose command failed for environment break-filter-js-from-html. Command: docker compose -p break-filter-js-from-html__2vqwv8p -f /Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/environments/docker/docker-compose-prebuilt.yaml up -d. Return code: 1. Stdout: unable to get image 'alexgshaw/break-filter-js-from-html:20251031': Cannot connect to the Docker daemon at unix:///Users/usuario/.docker/run/docker.sock. Is the docker daemon running?\n. Stderr: None. ",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/trial/trial.py\", line 350, in run\n    await self._setup_environment()\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/trial/trial.py\", line 196, in _setup_environment\n    await self._start_environment_with_retry()\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 189, in async_wrapped\n    return await copy(fn, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 111, in __call__\n    do = await self.iter(retry_state=retry_state)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 153, in iter\n    result = await action(retry_state)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/_utils.py\", line 99, in inner\n    return call(*args, **kwargs)\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/__init__.py\", line 400, in <lambda>\n    self._add_action_func(lambda rs: rs.outcome.result())\n                                     ~~~~~~~~~~~~~~~~~^^\n  File \"/usr/local/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/_base.py\", line 443, in result\n    return self.__get_result()\n           ~~~~~~~~~~~~~~~~~^^\n  File \"/usr/local/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/_base.py\", line 395, in __get_result\n    raise self._exception\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/tenacity/asyncio/__init__.py\", line 114, in __call__\n    result = await fn(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/trial/trial.py\", line 208, in _start_environment_with_retry\n    await asyncio.wait_for(\n    ...<4 lines>...\n    )\n  File \"/usr/local/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py\", line 488, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/environments/docker/docker.py\", line 208, in start\n    await self._run_docker_compose_command([\"up\", \"-d\"])\n  File \"/Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/environments/docker/docker.py\", line 184, in _run_docker_compose_command\n    raise RuntimeError(\n    ...<5 lines>...\n    )\nRuntimeError: Docker compose command failed for environment break-filter-js-from-html. Command: docker compose -p break-filter-js-from-html__2vqwv8p -f /Users/usuario/Desktop/cli-agent/harbor_env/lib/python3.14/site-packages/harbor/environments/docker/docker-compose-prebuilt.yaml up -d. Return code: 1. Stdout: unable to get image 'alexgshaw/break-filter-js-from-html:20251031': Cannot connect to the Docker daemon at unix:///Users/usuario/.docker/run/docker.sock. Is the docker daemon running?\n. Stderr: None. \n",
+        "occurred_at": "2026-01-24T22:03:25.417900"
+    },
+    "started_at": "2026-01-24T21:03:25.037302Z",
+    "finished_at": "2026-01-24T21:03:25.790431Z",
+    "environment_setup": {
+        "started_at": "2026-01-24T21:03:25.039191Z",
+        "finished_at": "2026-01-24T21:03:25.414803Z"
+    },
+    "agent_setup": null,
+    "agent_execution": null,
+    "verifier": null
+}
