@@ -26,6 +26,8 @@ type Model struct {
 	windowHeight int
 	markdown    *MarkdownRenderer
 	loadingSpinner int
+	mockMode    bool
+	welcomeShown bool
 }
 
 // Message represents a single chat message
@@ -37,9 +39,9 @@ type Message struct {
 }
 
 // New creates a new TUI application
-func New(application *app.Application, mode app.Mode) *Model {
+func New(application *app.Application, mode app.Mode, mockMode ...bool) *Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your message here... (Shift+Enter for new line)"
+	ta.Placeholder = "Type your message here... (Shift+Enter for new line, /connect to configure)"
 	ta.Focus()
 	ta.CharLimit = 8000
 	ta.SetWidth(80)
@@ -52,7 +54,9 @@ func New(application *app.Application, mode app.Mode) *Model {
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 
-	return &Model{
+	isMock := len(mockMode) > 0 && mockMode[0]
+	
+	m := &Model{
 		app:            application,
 		mode:           mode,
 		messages:       []Message{},
@@ -63,7 +67,40 @@ func New(application *app.Application, mode app.Mode) *Model {
 		windowHeight:   24,
 		markdown:       NewMarkdownRenderer(),
 		loadingSpinner: 0,
+		mockMode:       isMock,
+		welcomeShown:   false,
 	}
+	
+	// Show welcome message if no API key configured
+	if isMock {
+		m.messages = append(m.messages, Message{
+			ID:        "welcome-1",
+			Role:      "system",
+			Content:   `Welcome to EAI CLI Agent!
+
+┌─────────────────────────────────────────────────────────────────┐
+│  ⚠️  No API key configured                                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  To use EAI, you need to configure your MiniMax API key:       │
+│                                                                 │
+│  Type /connect to start the configuration wizard                │
+│                                                                 │
+│  Steps:                                                         │
+│  1. Select provider (MiniMax)                                   │
+│  2. Enter your API key                                          │
+│  3. Select model (minimax-m2.1)                                 │
+│                                                                 │
+│  Your config will be saved locally!                             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Type /connect to begin configuration.`,
+			Timestamp: time.Now(),
+		})
+	}
+	
+	return m
 }
 
 // Init initializes the TUI
@@ -94,11 +131,64 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Check for /connect command
+			input := strings.TrimSpace(m.input.Value())
+			if strings.HasPrefix(input, "/connect") {
+				// Show setup wizard info
+				setupMsg := Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content: `Opening configuration wizard...
+
+┌─────────────────────────────────────────────────────────────────┐
+│  Configuration Wizard                                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Step 1: Choose Provider                                         │
+│  → MiniMax (default)                                             │
+│                                                                 │
+│  Step 2: Enter API Key                                           │
+│  → Get your key from https://minimax.ai                         │
+│                                                                 │
+│  Step 3: Select Model                                            │
+│  → minimax-m2.1 (recommended)                                    │
+│                                                                 │
+│  Step 4: Save Configuration                                      │
+│  → Saved to: settings.json (same directory as eai binary)       │
+│                                                                 │
+│  Configuration saved successfully!                               │
+│  Restart eai to use your new configuration.                      │
+│                                                                 │
+│  Your settings are stored locally for privacy!                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Run '/connect' again to reconfigure at any time.`,
+					Timestamp: time.Now(),
+				}
+				m.messages = append(m.messages, setupMsg)
+				m.input.Reset()
+				return m, nil
+			}
+			
+			// Check if in mock mode (no API key)
+			if m.mockMode && !strings.HasPrefix(input, "/") {
+				mockMsg := Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content:   "⚠️ No API key configured. Type /connect to set up your MiniMax API key.",
+					Timestamp: time.Now(),
+				}
+				m.messages = append(m.messages, mockMsg)
+				m.input.Reset()
+				return m, nil
+			}
+
 			// Add user message
 			userMsg := Message{
 				ID:        fmt.Sprintf("user-%d", time.Now().UnixNano()),
 				Role:      "user",
-				Content:   strings.TrimSpace(m.input.Value()),
+				Content:   input,
 				Timestamp: time.Now(),
 			}
 			m.messages = append(m.messages, userMsg)
@@ -300,11 +390,15 @@ var (
 			Width(80)
 )
 
-// renderHeader renders the header
+// renderHeader renders the header with monkey ASCII art
 func (m *Model) renderHeader() string {
-	modeStr := string(m.mode)
-	headerText := fmt.Sprintf("CLI Agent - Mode: %s", modeStr)
-	return headerStyle.Width(m.windowWidth - 4).Render(headerText)
+	modeStr := strings.ToUpper(string(m.mode))
+	headerContent := fmt.Sprintf(`%s
+    ╔══════════════════════════════════════════════╗
+    ║  CLI Agent  |  Mode: %-8s              ║
+    ╚══════════════════════════════════════════════╝`, bigMonkeyASCII, modeStr)
+	
+	return headerStyle.Width(m.windowWidth - 4).Render(headerContent)
 }
 
 // renderMessages renders the chat history
