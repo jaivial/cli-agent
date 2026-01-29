@@ -372,7 +372,7 @@ setup_completion() {
             echo "  echo 'source ${completion_file}' >> ~/.bashrc"
             ;;
         zsh)
-            echo "  Add to ~/.zshrc: fpath=(\"${completion_dir}" \$fpath) && autoload -U compinit"
+            echo "  Add to ~/.zshrc: fpath=(${completion_dir} \\\$fpath) && autoload -U compinit"
             ;;
         fish)
             echo "  Restart fish shell or run: source ${completion_file}"
