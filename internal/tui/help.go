@@ -50,6 +50,21 @@ func (m helpModel) View() string {
 
 	b.WriteString("\n")
 
+	// Configuration
+	b.WriteString(helpSectionStyle.Render("Configuration"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf(" %s %s Configure API provider\n",
+		helpKeyStyle.Render("/connect"),
+		helpDescriptionStyle.Render("Open setup wizard for MiniMax API key")))
+	b.WriteString(helpDescriptionStyle.Render("   • Choose provider (MiniMax)"))
+	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("   • Enter API key"))
+	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("   • Select model (minimax-m2.1)"))
+	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("   • Config saved locally to settings.json"))
+	b.WriteString("\n")
+
 	// Input tips
 	b.WriteString(helpSectionStyle.Render("Input Tips"))
 	b.WriteString("\n")
@@ -59,7 +74,7 @@ func (m helpModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(helpDescriptionStyle.Render("• Character limit: 8000 characters"))
 	b.WriteString("\n")
-
+	b.WriteString(helpDescriptionStyle.Render("• Type /connect to configure your API key"))
 	b.WriteString("\n")
 
 	// Current mode
@@ -74,7 +89,7 @@ func (m helpModel) View() string {
 
 	// Footer with tips
 	b.WriteString("\n")
-	b.WriteString(helpFooterStyle.Render("Press q to quit | Type your message below"))
+	b.WriteString(helpFooterStyle.Render("Press q to quit | Type /connect to configure | Enter to send"))
 
 	return helpStyle.Width(m.width).Render(b.String())
 }
@@ -120,35 +135,35 @@ func (k keyMap) FullHelp() [][]key.Binding {
 var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color(colorPrimary)).
-			Background(lipgloss.Color(colorBg)).
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
-			BorderBottomForeground(lipgloss.Color(colorBorder)).
+			BorderBottomForeground(lipgloss.Color("#7D56F4")).
 			Padding(0, 1).
 			MarginBottom(1)
 
 	helpSectionStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color(colorSecondary)).
-			Background(lipgloss.Color(colorBg)).
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Background(lipgloss.Color("#1A1A2E")).
 			Width(80)
 
 	helpKeyStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color(colorAccent)).
-			Background(lipgloss.Color(colorBg)).
+			Foreground(lipgloss.Color("#FF6B6B")).
+			Background(lipgloss.Color("#1A1A2E")).
 			Padding(0, 2).
 			Width(15)
 
 	helpDescriptionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorFg)).
-			Background(lipgloss.Color(colorBg)).
+			Foreground(lipgloss.Color("#E0E0E0")).
+			Background(lipgloss.Color("#1A1A2E")).
 			Width(60)
 
 	helpFooterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorFgMuted)).
-			Background(lipgloss.Color(colorBg)).
+			Foreground(lipgloss.Color("#6B7280")).
+			Background(lipgloss.Color("#1A1A2E")).
 			Italic(true).
 			Width(80)
 )

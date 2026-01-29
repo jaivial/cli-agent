@@ -1,0 +1,110 @@
+{
+  "timestamp": "2026-01-27T22:25:16.038000",
+  "summary": {
+    "total_tasks": 13,
+    "successful": 13,
+    "failed": 0,
+    "timeout": 0,
+    "errors": 0,
+    "total_duration_sec": 162.769921541214,
+    "avg_duration_sec": 12.520763195477999,
+    "success_rate_percent": 100.0
+  },
+  "target": {
+    "value": 70.0,
+    "achieved": true
+  },
+  "tasks": [
+    {
+      "task_id": "file_001",
+      "status": "success",
+      "duration_sec": 24.54470729827881,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "file_002",
+      "status": "success",
+      "duration_sec": 3.0125811100006104,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "file_003",
+      "status": "success",
+      "duration_sec": 15.839485168457031,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "file_004",
+      "status": "success",
+      "duration_sec": 7.0602545738220215,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "sys_001",
+      "status": "success",
+      "duration_sec": 6.469546794891357,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "sys_002",
+      "status": "success",
+      "duration_sec": 10.139140367507935,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "sys_003",
+      "status": "success",
+      "duration_sec": 5.8423309326171875,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "search_001",
+      "status": "success",
+      "duration_sec": 5.423988342285156,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "search_002",
+      "status": "success",
+      "duration_sec": 20.893542528152466,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "code_001",
+      "status": "success",
+      "duration_sec": 8.627523183822632,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "code_002",
+      "status": "success",
+      "duration_sec": 12.372705936431885,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "dir_001",
+      "status": "success",
+      "duration_sec": 29.286468267440796,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "dir_002",
+      "status": "success",
+      "duration_sec": 13.257647037506104,
+      "commands_executed": 1,
+      "success": true
+    }
+  ]
+}

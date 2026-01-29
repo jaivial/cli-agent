@@ -284,34 +284,42 @@ func (l *AgentLoop) buildPrompt(messages []AgentMessage) string {
 }
 
 func (l *AgentLoop) buildSystemMessage() string {
-	toolsJSON, _ := json.MarshalIndent(l.Tools, "", "  ")
-	return fmt.Sprintf(`You are a powerful CLI agent that helps users accomplish tasks through shell commands and file operations.
+	return l.buildSystemMessageEnhanced()
+}
 
-## Your Capabilities
-
-You have access to the following tools:
-
-%s
-
-## Guidelines
-
-1. **Analyze the task** - Break down what the user is asking
-2. **Plan your approach** - Decide which tools to use and in what order
-3. **Execute step by step** - Use tools iteratively, building on results
-4. **Verify results** - Check that each step succeeded before proceeding
-5. **Adapt if needed** - If something doesn't work, try a different approach
-
-## Output Format
-
-When you need to use tools, respond with a JSON object containing tool_calls.
-When you're done or don't need tools, respond with a natural language explanation.
-
-## Important Notes
-
-- Always verify file operations succeeded
-- Use appropriate error handling
-- Be concise but thorough
-- Explain what you're doing as you go`, string(toolsJSON))
+// GetTaskCategory returns the category for task-specific prompts
+func GetTaskCategory(task string) string {
+	taskLower := strings.ToLower(task)
+	
+	switch {
+	case strings.Contains(taskLower, "git"):
+		return "git"
+	case strings.Contains(taskLower, "build") || strings.Contains(taskLower, "compile") || 
+	     strings.Contains(taskLower, "cmake") || strings.Contains(taskLower, "make") ||
+	     strings.Contains(taskLower, "cython") || strings.Contains(taskLower, "pov-ray") ||
+	     strings.Contains(taskLower, "caffe") || strings.Contains(taskLower, "pmars"):
+		return "build"
+	case strings.Contains(taskLower, "nginx") || strings.Contains(taskLower, "ssh") || 
+	     strings.Contains(taskLower, "docker") || strings.Contains(taskLower, "ssl") || 
+	     strings.Contains(taskLower, "cert") || strings.Contains(taskLower, "qemu") ||
+	     strings.Contains(taskLower, "pypi") || strings.Contains(taskLower, "windows"):
+		return "devops"
+	case strings.Contains(taskLower, "pytorch") || strings.Contains(taskLower, "torch") || 
+	     strings.Contains(taskLower, "tensorflow") || strings.Contains(taskLower, "model") ||
+	     strings.Contains(taskLower, "mcmc") || strings.Contains(taskLower, "stan") ||
+	     strings.Contains(taskLower, "sampling"):
+		return "ml"
+	case strings.Contains(taskLower, "sqlite") || strings.Contains(taskLower, "database") || 
+	     strings.Contains(taskLower, "sql"):
+		return "database"
+	case strings.Contains(taskLower, "regex") || strings.Contains(taskLower, "extract") ||
+	     strings.Contains(taskLower, "crack") || strings.Contains(taskLower, "eigenval") ||
+	     strings.Contains(taskLower, "distribution") || strings.Contains(taskLower, "query") ||
+	     strings.Contains(taskLower, "adaptive") || strings.Contains(taskLower, "install"):
+		return "simple"
+	default:
+		return "default"
+	}
 }
 
 func (l *AgentLoop) parseToolCalls(response string) []ToolCall {

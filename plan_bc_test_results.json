@@ -1,0 +1,12 @@
+{
+  "success": 5,
+  "total": 6,
+  "results": {
+    "regex-log": "success",
+    "sqlite-db-truncate": "success",
+    "sqlite-with-gcov": "success",
+    "git-multibranch": "success",
+    "compile-compcert": "success",
+    "qemu-startup": "failed"
+  }
+}

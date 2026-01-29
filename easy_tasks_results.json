@@ -1,0 +1,14 @@
+{
+  "success": 5,
+  "total": 8,
+  "results": {
+    "regex-log": "failed",
+    "fix-git": "success",
+    "nginx-request-logging": "success",
+    "openssl-selfsigned-cert": "success",
+    "sqlite-db-truncate": "success",
+    "sqlite-with-gcov": "success",
+    "vulnerable-secret": "failed",
+    "headless-terminal": "failed"
+  }
+}

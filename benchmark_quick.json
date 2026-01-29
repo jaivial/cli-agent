@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-01-27T22:19:32.316837",
+  "summary": {
+    "total_tasks": 5,
+    "successful": 4,
+    "failed": 0,
+    "timeout": 0,
+    "errors": 1,
+    "total_duration_sec": 40.57091188430786,
+    "avg_duration_sec": 8.114182376861573,
+    "success_rate_percent": 80.0
+  },
+  "target": {
+    "value": 70.0,
+    "achieved": true
+  },
+  "tasks": [
+    {
+      "task_id": "file_001",
+      "status": "success",
+      "duration_sec": 12.614885807037354,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "file_002",
+      "status": "error",
+      "duration_sec": 3.7692830562591553,
+      "commands_executed": 1,
+      "success": false
+    },
+    {
+      "task_id": "file_003",
+      "status": "success",
+      "duration_sec": 3.206024169921875,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "file_004",
+      "status": "success",
+      "duration_sec": 13.957667589187622,
+      "commands_executed": 1,
+      "success": true
+    },
+    {
+      "task_id": "sys_001",
+      "status": "success",
+      "duration_sec": 7.0230512619018555,
+      "commands_executed": 1,
+      "success": true
+    }
+  ]
+}

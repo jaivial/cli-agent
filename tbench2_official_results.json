@@ -1,0 +1,374 @@
+{
+  "benchmark": "Terminal-Bench 2.0 OFICIAL",
+  "timestamp": "2026-01-29T10:25:08.466345",
+  "model": "minimax/MiniMax-M2.1",
+  "improvements": [
+    "enhanced_system_prompt",
+    "retry_with_backoff"
+  ],
+  "summary": {
+    "total": 89,
+    "success": 61,
+    "failed": 28,
+    "timeout": 0,
+    "rate": 68.53932584269663
+  },
+  "tasks": [
+    {
+      "task": "adaptive-rejection-sampler",
+      "status": "failed"
+    },
+    {
+      "task": "bn-fit-modify",
+      "status": "success"
+    },
+    {
+      "task": "break-filter-js-from-html",
+      "status": "success"
+    },
+    {
+      "task": "build-cython-ext",
+      "status": "success"
+    },
+    {
+      "task": "build-pmars",
+      "status": "failed"
+    },
+    {
+      "task": "build-pov-ray",
+      "status": "failed"
+    },
+    {
+      "task": "caffe-cifar-10",
+      "status": "failed"
+    },
+    {
+      "task": "cancel-async-tasks",
+      "status": "success"
+    },
+    {
+      "task": "chess-best-move",
+      "status": "success"
+    },
+    {
+      "task": "circuit-fibsqrt",
+      "status": "success"
+    },
+    {
+      "task": "cobol-modernization",
+      "status": "success"
+    },
+    {
+      "task": "code-from-image",
+      "status": "success"
+    },
+    {
+      "task": "compile-compcert",
+      "status": "failed"
+    },
+    {
+      "task": "configure-git-webserver",
+      "status": "success"
+    },
+    {
+      "task": "constraints-scheduling",
+      "status": "success"
+    },
+    {
+      "task": "count-dataset-tokens",
+      "status": "success"
+    },
+    {
+      "task": "crack-7z-hash",
+      "status": "failed"
+    },
+    {
+      "task": "custom-memory-heap-crash",
+      "status": "success"
+    },
+    {
+      "task": "db-wal-recovery",
+      "status": "success"
+    },
+    {
+      "task": "distribution-search",
+      "status": "failed"
+    },
+    {
+      "task": "dna-assembly",
+      "status": "success"
+    },
+    {
+      "task": "dna-insert",
+      "status": "success"
+    },
+    {
+      "task": "extract-elf",
+      "status": "failed"
+    },
+    {
+      "task": "extract-moves-from-video",
+      "status": "failed"
+    },
+    {
+      "task": "feal-differential-cryptanalysis",
+      "status": "success"
+    },
+    {
+      "task": "feal-linear-cryptanalysis",
+      "status": "success"
+    },
+    {
+      "task": "filter-js-from-html",
+      "status": "success"
+    },
+    {
+      "task": "financial-document-processor",
+      "status": "success"
+    },
+    {
+      "task": "fix-code-vulnerability",
+      "status": "success"
+    },
+    {
+      "task": "fix-git",
+      "status": "success"
+    },
+    {
+      "task": "fix-ocaml-gc",
+      "status": "success"
+    },
+    {
+      "task": "gcode-to-text",
+      "status": "success"
+    },
+    {
+      "task": "git-leak-recovery",
+      "status": "failed"
+    },
+    {
+      "task": "git-multibranch",
+      "status": "failed"
+    },
+    {
+      "task": "gpt2-codegolf",
+      "status": "success"
+    },
+    {
+      "task": "headless-terminal",
+      "status": "success"
+    },
+    {
+      "task": "hf-model-inference",
+      "status": "success"
+    },
+    {
+      "task": "install-windows-3.11",
+      "status": "failed"
+    },
+    {
+      "task": "kv-store-grpc",
+      "status": "success"
+    },
+    {
+      "task": "large-scale-text-editing",
+      "status": "success"
+    },
+    {
+      "task": "largest-eigenval",
+      "status": "failed"
+    },
+    {
+      "task": "llm-inference-batching-scheduler",
+      "status": "success"
+    },
+    {
+      "task": "log-summary-date-ranges",
+      "status": "success"
+    },
+    {
+      "task": "mailman",
+      "status": "success"
+    },
+    {
+      "task": "make-doom-for-mips",
+      "status": "success"
+    },
+    {
+      "task": "make-mips-interpreter",
+      "status": "failed"
+    },
+    {
+      "task": "mcmc-sampling-stan",
+      "status": "success"
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "status": "failed"
+    },
+    {
+      "task": "model-extraction-relu-logits",
+      "status": "failed"
+    },
+    {
+      "task": "modernize-scientific-stack",
+      "status": "success"
+    },
+    {
+      "task": "mteb-leaderboard",
+      "status": "failed"
+    },
+    {
+      "task": "mteb-retrieve",
+      "status": "success"
+    },
+    {
+      "task": "multi-source-data-merger",
+      "status": "success"
+    },
+    {
+      "task": "nginx-request-logging",
+      "status": "success"
+    },
+    {
+      "task": "openssl-selfsigned-cert",
+      "status": "success"
+    },
+    {
+      "task": "overfull-hbox",
+      "status": "success"
+    },
+    {
+      "task": "password-recovery",
+      "status": "success"
+    },
+    {
+      "task": "path-tracing",
+      "status": "success"
+    },
+    {
+      "task": "path-tracing-reverse",
+      "status": "success"
+    },
+    {
+      "task": "polyglot-c-py",
+      "status": "failed"
+    },
+    {
+      "task": "polyglot-rust-c",
+      "status": "failed"
+    },
+    {
+      "task": "portfolio-optimization",
+      "status": "success"
+    },
+    {
+      "task": "protein-assembly",
+      "status": "success"
+    },
+    {
+      "task": "prove-plus-comm",
+      "status": "success"
+    },
+    {
+      "task": "pypi-server",
+      "status": "failed"
+    },
+    {
+      "task": "pytorch-model-cli",
+      "status": "success"
+    },
+    {
+      "task": "pytorch-model-recovery",
+      "status": "failed"
+    },
+    {
+      "task": "qemu-alpine-ssh",
+      "status": "failed"
+    },
+    {
+      "task": "qemu-startup",
+      "status": "failed"
+    },
+    {
+      "task": "query-optimize",
+      "status": "failed"
+    },
+    {
+      "task": "raman-fitting",
+      "status": "success"
+    },
+    {
+      "task": "regex-chess",
+      "status": "success"
+    },
+    {
+      "task": "regex-log",
+      "status": "failed"
+    },
+    {
+      "task": "reshard-c4-data",
+      "status": "success"
+    },
+    {
+      "task": "rstan-to-pystan",
+      "status": "success"
+    },
+    {
+      "task": "sam-cell-seg",
+      "status": "success"
+    },
+    {
+      "task": "sanitize-git-repo",
+      "status": "success"
+    },
+    {
+      "task": "schemelike-metacircular-eval",
+      "status": "success"
+    },
+    {
+      "task": "sparql-university",
+      "status": "success"
+    },
+    {
+      "task": "sqlite-db-truncate",
+      "status": "failed"
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "status": "failed"
+    },
+    {
+      "task": "torch-pipeline-parallelism",
+      "status": "success"
+    },
+    {
+      "task": "torch-tensor-parallelism",
+      "status": "failed"
+    },
+    {
+      "task": "train-fasttext",
+      "status": "success"
+    },
+    {
+      "task": "tune-mjcf",
+      "status": "success"
+    },
+    {
+      "task": "video-processing",
+      "status": "success"
+    },
+    {
+      "task": "vulnerable-secret",
+      "status": "success"
+    },
+    {
+      "task": "winning-avg-corewars",
+      "status": "success"
+    },
+    {
+      "task": "write-compressor",
+      "status": "success"
+    }
+  ]
+}

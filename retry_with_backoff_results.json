@@ -1,0 +1,124 @@
+{
+  "timestamp": "2026-01-29T00:08:33.433343",
+  "total_tasks": 29,
+  "recovered": 26,
+  "still_failed": 3,
+  "results": {
+    "adaptive-rejection-sampler": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "build-cython-ext": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "build-pmars": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "build-pov-ray": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "chess-best-move": {
+      "status": "success",
+      "details": "Attempt 2"
+    },
+    "cobol-modernization": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "code-from-image": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "constraints-scheduling": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "distribution-search": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "feal-differential-cryptanalysis": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "fix-git": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "gpt2-codegolf": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "headless-terminal": {
+      "status": "success",
+      "details": "Attempt 3"
+    },
+    "install-windows-3.11": {
+      "status": "success",
+      "details": "Attempt 2"
+    },
+    "kv-store-grpc": {
+      "status": "failed",
+      "details": "After 3 attempts"
+    },
+    "llm-inference-batching-scheduler": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "mailman": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "make-doom-for-mips": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "merge-diff-arc-agi-task": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "modernize-scientific-stack": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "mteb-leaderboard": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "openssl-selfsigned-cert": {
+      "status": "failed",
+      "details": "After 3 attempts"
+    },
+    "path-tracing-reverse": {
+      "status": "success",
+      "details": "Attempt 2"
+    },
+    "polyglot-c-py": {
+      "status": "success",
+      "details": "Attempt 3"
+    },
+    "polyglot-rust-c": {
+      "status": "success",
+      "details": "Attempt 3"
+    },
+    "pypi-server": {
+      "status": "success",
+      "details": "Attempt 2"
+    },
+    "pytorch-model-recovery": {
+      "status": "failed",
+      "details": "After 3 attempts"
+    },
+    "sparql-university": {
+      "status": "success",
+      "details": "Attempt 1"
+    },
+    "vulnerable-secret": {
+      "status": "success",
+      "details": "Attempt 1"
+    }
+  }
+}
