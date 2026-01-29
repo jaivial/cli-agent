@@ -77,9 +77,9 @@ func generateCompletion(shell string) error {
 
 func main() {
 	root := &cobra.Command{
-		Use:   "eai",
-		Short: "EAI - CLI Agent with MiniMax API",
-		Long:  "EAI is an interactive CLI agent powered by MiniMax API.\n\nUse without arguments for TUI mode, or with the 'agent' subcommand for automated task execution.\n\nFor more information, visit: " + repoURL,
+		Use:     "eai",
+		Short:   "EAI - CLI Agent with MiniMax API",
+		Long:    "EAI is an interactive CLI agent powered by MiniMax API.\n\nUse without arguments for TUI mode, or with the 'agent' subcommand for automated task execution.\n\nFor more information, visit: " + repoURL,
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if v, _ := cmd.Flags().GetBool("version"); v {
@@ -88,7 +88,7 @@ func main() {
 				fmt.Printf("Installed at: %s\n", getBinaryPath())
 				return nil
 			}
-			
+
 			if comp, _ := cmd.Flags().GetString("completion"); comp != "" {
 				return generateCompletion(comp)
 			}
@@ -104,20 +104,20 @@ func main() {
 			if cfg.BaseURL == "" {
 				cfg.BaseURL = os.Getenv("MINIMAX_BASE_URL")
 			}
-			
+
 			mockMode := cfg.MinimaxAPIKey == ""
 			application, err := app.NewApplication(cfg, mockMode)
 			if err != nil {
 				return err
 			}
-			
+
 			modeFlag, _ := cmd.Flags().GetString("mode")
 			mode, ok := app.ParseMode(modeFlag)
 			if !ok {
 				mode, _ = app.ParseMode(cfg.DefaultMode)
 			}
 
-			p := tea.NewProgram(tui.New(application, mode, mockMode))
+			p := tea.NewProgram(tui.NewMainModel(application, mode))
 			if _, err := p.Run(); err != nil {
 				return err
 			}
@@ -134,7 +134,7 @@ func main() {
 		Use:   "agent [task]",
 		Short: "Run the CLI agent with MiniMax API",
 		Long:  "Run an iterative CLI agent that uses MiniMax API to accomplish tasks.\n\nExamples:\n  - eai agent\n  - eai agent \"List Go files\"\n  - eai agent --max-loops 20 \"Analyze\"\n  - eai agent --mock \"List files\"",
-		Args: cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -151,7 +151,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			
+
 			if agentMock {
 				cfg.MinimaxAPIKey = "mock"
 				cfg.Model = "mock"
@@ -236,7 +236,7 @@ func main() {
 		Use:   "completion [shell]",
 		Short: "Generate shell completion",
 		Long:  "Generate shell completion script for eai.\n\nExamples:\n  - eai completion bash >> ~/.bashrc\n  - eai completion zsh > ~/.zsh/completion/_eai\n  - eai completion fish > ~/.config/fish/completions/eai.fish",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return generateCompletion(args[0])
 		},
@@ -250,7 +250,7 @@ func main() {
 }
 
 var (
-	agentMaxLoops  int
-	agentTask      string
-	agentMock      bool
+	agentMaxLoops int
+	agentTask     string
+	agentMock     bool
 )

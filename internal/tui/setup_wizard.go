@@ -11,15 +11,6 @@ import (
 	"cli-agent/internal/app"
 )
 
-var (
-	setupSuccessStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4"))
-	
-	setupErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF6B6B"))
-)
-
-// SetupWizard implements the configuration wizard
 type SetupWizard struct {
 	step      int
 	provider  string
@@ -41,13 +32,10 @@ func NewSetupWizard(cfg *app.Config) *SetupWizard {
 		providers: []string{"MiniMax"},
 		selected:  0,
 		cfg:       cfg,
+		input:     textinput.New(),
 	}
-	
-	// Initialize API key input
-	s.input = textinput.New()
 	s.input.Placeholder = "sk-cp-..."
 	s.input.Focus()
-	
 	return s
 }
 
@@ -57,21 +45,21 @@ func (s *SetupWizard) Init() tea.Cmd {
 
 func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			s.done = true
 			return s, tea.Quit
-		
+
 		case "enter":
 			switch s.step {
-			case 0: // Provider selection
+			case 0:
 				s.provider = s.providers[s.selected]
 				s.step = 1
 				s.input.Focus()
-			case 1: // API Key
+			case 1:
 				s.apiKey = s.input.Value()
 				if s.apiKey == "" {
 					s.statusMsg = "Please enter an API key"
@@ -81,17 +69,16 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					s.statusMsg = "Warning: API key doesn't look like a MiniMax key (should start with sk-)"
 				}
 				s.step = 2
-			case 2: // Model selection
+			case 2:
 				s.model = "minimax-m2.1"
 				s.step = 3
-			case 3: // Save and exit
-				// Save config
+			case 3:
 				s.cfg.MinimaxAPIKey = s.apiKey
 				s.cfg.Model = s.model
 				s.cfg.BaseURL = "https://api.minimax.io/anthropic/v1/messages"
 				s.cfg.MaxTokens = 2048
 				s.cfg.Installed = true
-				
+
 				if err := app.SaveConfig(*s.cfg, ""); err != nil {
 					s.statusMsg = fmt.Sprintf("Error saving config: %v", err)
 				} else {
@@ -100,27 +87,35 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return s, tea.Quit
 				}
 			}
-		
+
 		case "up", "k":
 			if s.step == 0 && s.selected > 0 {
 				s.selected--
+			} else if s.step > 0 {
+				s.step--
+				if s.step == 0 {
+					s.selected = 0
+				}
 			}
 		case "down", "j":
 			if s.step == 0 && s.selected < len(s.providers)-1 {
 				s.selected++
+			} else if s.step < 3 {
+				s.step++
+			}
+
+		default:
+			if s.step == 1 {
+				s.input, cmd = s.input.Update(msg)
+				return s, cmd
 			}
 		}
-	
+
 	case tea.WindowSizeMsg:
 		s.width = msg.Width
 		s.height = msg.Height
-	
-	default:
-		if s.step == 1 {
-			s.input, cmd = s.input.Update(msg)
-		}
 	}
-	
+
 	return s, cmd
 }
 
@@ -128,86 +123,107 @@ func (s *SetupWizard) View() string {
 	if s.done {
 		return ""
 	}
-	
-	// Calculate centered layout
-	contentWidth := min(50, s.width-4)
-	
-	header := headerStyle.Render("  EAI Setup Wizard  ")
-	header = lipgloss.NewStyle().Width(contentWidth + 4).Render(header)
-	
+
+	header := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).
+		Padding(0, 2).
+		Width(s.width - 4).
+		Render("  EAI Setup Wizard  ")
+
 	var body string
-	
+	var progressBar string
+
 	switch s.step {
 	case 0:
-		// Provider selection
+		progressBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Render("▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
 		options := ""
 		for i, p := range s.providers {
 			marker := "○"
 			if i == s.selected {
 				marker = "●"
 			}
-			options += fmt.Sprintf(" %s %s\n", marker, p)
+			options += fmt.Sprintf("  %s %s\n", marker, p)
 		}
 		body = fmt.Sprintf(`
-Step 1 of 3: Choose Provider
+Step 1 of 4: Select Provider
 
 %s
+Use ↑/↓ to select, Enter to confirm.
 
-Use ↑/↓ to select, Enter to confirm, Ctrl+C to cancel.
 `, options)
-	
-	case 1:
-		body = fmt.Sprintf(`
-Step 2 of 3: Enter your MiniMax API Key
 
-Get your API key from: https://minimax.ai
+	case 1:
+		progressBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Render("▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
+		body = fmt.Sprintf(`
+Step 2 of 4: Enter API Key
+
+Get your key from: https://minimax.ai
 
 %s
 
 API Key: %s
 
-Press Enter to continue or Ctrl+C to cancel.
+Use ↑ to go back, Enter to continue, Ctrl+C to cancel.
 `, s.statusMsg, s.input.View())
 		s.statusMsg = ""
-	
-	case 2:
-		body = fmt.Sprintf(`
-Step 3 of 3: Select Model
 
-Available models:
+	case 2:
+		progressBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Render("▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
+		body = fmt.Sprintf(`
+Step 3 of 4: Select Model
+
   ● minimax-m2.1 (recommended)
 
 Selected: %s
 
-Press Enter to save configuration or Ctrl+C to cancel.
+Use ↑ to go back, Enter to save, Ctrl+C to cancel.
 `, s.model)
-	
-	case 3:
-		body = fmt.Sprintf(`
-✓ Setup Complete!
 
-Provider:   MiniMax
-Model:      %s
-API Key:    %s...
+	case 3:
+		progressBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Render("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓")
+		body = fmt.Sprintf(`
+Step 4 of 4: Confirm Configuration
+
+  ✓ Provider:   %s
+  ✓ Model:      %s
+  ✓ API Key:    %s...%s
 
 Configuration saved to:
 %s
 
-Run 'eai' to start using the CLI agent!
-
-Press any key to exit.
-`, s.model, s.apiKey[:10], app.GetBinaryConfigPath())
+Use ↑ to go back, Enter to confirm, Ctrl+C to cancel.
+`, s.provider, s.model, s.apiKey[:4], s.apiKey[len(s.apiKey)-4:], app.GetBinaryConfigPath())
 	}
-	
-	// Center the content
-	paddingTop := max(0, (s.height-15)/2)
-	paddingSides := max(0, (s.width-contentWidth-4)/2)
-	
+
+	help := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Render("\n↑/↓ Navigate  |  Enter Confirm  |  Ctrl+C Cancel")
+
+	content := header + "\n\n" + progressBar + "\n\n" + body + help
+
+	paddingTop := max(0, (s.height-20)/2)
+	paddingSides := max(0, (s.width-lipgloss.Width(content)-4)/2)
+
 	result := strings.Repeat("\n", paddingTop)
-	result += strings.Repeat(" ", paddingSides) + header + "\n\n"
-	result += strings.Repeat(" ", paddingSides) + body
-	
-	return result
+	if paddingSides > 0 {
+		result += strings.Repeat(" ", paddingSides)
+	}
+	result += content
+
+	return lipgloss.NewStyle().
+		Width(s.width).
+		Height(s.height).
+		Render(result)
 }
 
 func (s *SetupWizard) Done() bool {

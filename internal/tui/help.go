@@ -8,34 +8,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// helpModel represents the help screen state
 type helpModel struct {
-	keys    keyMap
-	width   int
+	keys  keyMap
+	width int
 }
 
-// newHelpModel creates a new help model
 func newHelpModel() helpModel {
 	return helpModel{
-		keys:    defaultKeyMap(),
-		width:   80,
+		keys:  defaultKeyMap(),
+		width: 80,
 	}
 }
 
-// SetWidth updates the help screen width
 func (m *helpModel) SetWidth(width int) {
 	m.width = width
 }
 
-// View renders the help screen
 func (m helpModel) View() string {
 	var b strings.Builder
 
-	// Help title
 	b.WriteString(helpTitleStyle.Render("CLI Agent Help"))
 	b.WriteString("\n\n")
 
-	// Main commands
 	b.WriteString(helpSectionStyle.Render("Main Commands"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf(" %s %s Send message\n",
@@ -50,7 +44,16 @@ func (m helpModel) View() string {
 
 	b.WriteString("\n")
 
-	// Configuration
+	b.WriteString(helpSectionStyle.Render("Modes"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf(" %s %s Cycle through modes (plan/code/act)\n",
+		helpKeyStyle.Render(m.keys.NextMode.Help().Key),
+		helpDescriptionStyle.Render("Switch mode")))
+	b.WriteString(fmt.Sprintf(" Current mode: %s\n",
+		helpDescriptionStyle.Render("plan | code | act")))
+
+	b.WriteString("\n")
+
 	b.WriteString(helpSectionStyle.Render("Configuration"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf(" %s %s Configure API provider\n",
@@ -65,7 +68,8 @@ func (m helpModel) View() string {
 	b.WriteString(helpDescriptionStyle.Render("   • Config saved locally to settings.json"))
 	b.WriteString("\n")
 
-	// Input tips
+	b.WriteString("\n")
+
 	b.WriteString(helpSectionStyle.Render("Input Tips"))
 	b.WriteString("\n")
 	b.WriteString(helpDescriptionStyle.Render("• Type your message and press Enter to send"))
@@ -77,7 +81,8 @@ func (m helpModel) View() string {
 	b.WriteString(helpDescriptionStyle.Render("• Type /connect to configure your API key"))
 	b.WriteString("\n")
 
-	// Current mode
+	b.WriteString("\n")
+
 	b.WriteString(helpSectionStyle.Render("About"))
 	b.WriteString("\n")
 	b.WriteString(helpDescriptionStyle.Render("A modern AI CLI agent with enhanced TUI interface"))
@@ -87,51 +92,50 @@ func (m helpModel) View() string {
 	b.WriteString(helpDescriptionStyle.Render("and smooth animations for better user experience."))
 	b.WriteString("\n")
 
-	// Footer with tips
 	b.WriteString("\n")
-	b.WriteString(helpFooterStyle.Render("Press q to quit | Type /connect to configure | Enter to send"))
+	b.WriteString(helpFooterStyle.Render("Press q to quit | Shift+Tab to switch mode | Enter to send"))
 
 	return helpStyle.Width(m.width).Render(b.String())
 }
 
-// keyMap represents the keyboard bindings
 type keyMap struct {
-	Quit  key.Binding
-	Enter key.Binding
-	Clear key.Binding
+	Quit     key.Binding
+	Enter    key.Binding
+	Clear    key.Binding
+	NextMode key.Binding
 }
 
-// defaultKeyMap creates a new default key map
 func defaultKeyMap() keyMap {
 	return keyMap{
 		Quit: key.NewBinding(
-			key.WithKeys("q", "ctrl+c"),
-			key.WithHelp("q/ctrl+c", "quit"),
+			key.WithKeys("q"),
+			key.WithHelp("q", "quit"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "send message"),
 		),
 		Clear: key.NewBinding(
-			key.WithKeys("c", "ctrl+l"),
-			key.WithHelp("c/ctrl+l", "clear chat"),
+			key.WithKeys("x", "ctrl+l"),
+			key.WithHelp("x/ctrl+l", "clear chat"),
+		),
+		NextMode: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "switch mode"),
 		),
 	}
 }
 
-// ShortHelp returns the short help text for the key map
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Clear, k.Quit}
+	return []key.Binding{k.Enter, k.Clear, k.NextMode, k.Quit}
 }
 
-// FullHelp returns the full help text for the key map
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Enter, k.Clear, k.Quit},
+		{k.Enter, k.Clear, k.NextMode, k.Quit},
 	}
 }
 
-// Styles for help screen
 var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -144,10 +148,10 @@ var (
 			MarginBottom(1)
 
 	helpSectionStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Background(lipgloss.Color("#1A1A2E")).
-			Width(80)
+				Bold(true).
+				Foreground(lipgloss.Color("#4ECDC4")).
+				Background(lipgloss.Color("#1A1A2E")).
+				Width(80)
 
 	helpKeyStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -157,13 +161,19 @@ var (
 			Width(15)
 
 	helpDescriptionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E0E0E0")).
-			Background(lipgloss.Color("#1A1A2E")).
-			Width(60)
+				Foreground(lipgloss.Color("#E0E0E0")).
+				Background(lipgloss.Color("#1A1A2E")).
+				Width(60)
 
 	helpFooterStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280")).
 			Background(lipgloss.Color("#1A1A2E")).
 			Italic(true).
+			Width(80)
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#94A3B8")).
+			Background(lipgloss.Color("#0F172A")).
+			Padding(0, 3).
 			Width(80)
 )

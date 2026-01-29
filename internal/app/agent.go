@@ -34,24 +34,24 @@ type ToolResult struct {
 }
 
 type AgentState struct {
-	TaskID      string       `json:"task_id"`
-	Task        string       `json:"task"`
-	Iteration   int          `json:"iteration"`
-	MaxLoops    int          `json:"max_loops"`
+	TaskID      string         `json:"task_id"`
+	Task        string         `json:"task"`
+	Iteration   int            `json:"iteration"`
+	MaxLoops    int            `json:"max_loops"`
 	Messages    []AgentMessage `json:"messages"`
-	Results     []ToolResult  `json:"results"`
-	Completed   bool          `json:"completed"`
-	FinalOutput string       `json:"final_output,omitempty"`
-	StartedAt   time.Time     `json:"started_at"`
-	EndedAt     time.Time     `json:"ended_at,omitempty"`
+	Results     []ToolResult   `json:"results"`
+	Completed   bool           `json:"completed"`
+	FinalOutput string         `json:"final_output,omitempty"`
+	StartedAt   time.Time      `json:"started_at"`
+	EndedAt     time.Time      `json:"ended_at,omitempty"`
 }
 
 type AgentMessage struct {
-	Role        string          `json:"role"`
-	Content     string          `json:"content,omitempty"`
-	ToolCalls   []ToolCall      `json:"tool_calls,omitempty"`
-	ToolResults []ToolResult    `json:"tool_results,omitempty"`
-	Timestamp   time.Time       `json:"timestamp"`
+	Role        string       `json:"role"`
+	Content     string       `json:"content,omitempty"`
+	ToolCalls   []ToolCall   `json:"tool_calls,omitempty"`
+	ToolResults []ToolResult `json:"tool_results,omitempty"`
+	Timestamp   time.Time    `json:"timestamp"`
 }
 
 type AgentLoop struct {
@@ -180,6 +180,28 @@ func DefaultTools() []Tool {
 				"required": []string{"pattern"},
 			}),
 		},
+		{
+			Name:        "edit_file",
+			Description: "Edit a file by replacing old_text with new_text (in-place modification)",
+			Parameters: mustMarshal(map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]interface{}{
+						"type":        "string",
+						"description": "Path to the file to edit",
+					},
+					"old_text": map[string]interface{}{
+						"type":        "string",
+						"description": "Text to find and replace (exact match)",
+					},
+					"new_text": map[string]interface{}{
+						"type":        "string",
+						"description": "Replacement text",
+					},
+				},
+				"required": []string{"path", "old_text", "new_text"},
+			}),
+		},
 	}
 }
 
@@ -236,9 +258,9 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 		}
 
 		state.Messages = append(state.Messages, AgentMessage{
-			Role:       "assistant",
-			Content:    response,
-			Timestamp:  time.Now(),
+			Role:      "assistant",
+			Content:   response,
+			Timestamp: time.Now(),
 		})
 
 		toolCalls := l.parseToolCalls(response)
@@ -290,32 +312,32 @@ func (l *AgentLoop) buildSystemMessage() string {
 // GetTaskCategory returns the category for task-specific prompts
 func GetTaskCategory(task string) string {
 	taskLower := strings.ToLower(task)
-	
+
 	switch {
 	case strings.Contains(taskLower, "git"):
 		return "git"
-	case strings.Contains(taskLower, "build") || strings.Contains(taskLower, "compile") || 
-	     strings.Contains(taskLower, "cmake") || strings.Contains(taskLower, "make") ||
-	     strings.Contains(taskLower, "cython") || strings.Contains(taskLower, "pov-ray") ||
-	     strings.Contains(taskLower, "caffe") || strings.Contains(taskLower, "pmars"):
+	case strings.Contains(taskLower, "build") || strings.Contains(taskLower, "compile") ||
+		strings.Contains(taskLower, "cmake") || strings.Contains(taskLower, "make") ||
+		strings.Contains(taskLower, "cython") || strings.Contains(taskLower, "pov-ray") ||
+		strings.Contains(taskLower, "caffe") || strings.Contains(taskLower, "pmars"):
 		return "build"
-	case strings.Contains(taskLower, "nginx") || strings.Contains(taskLower, "ssh") || 
-	     strings.Contains(taskLower, "docker") || strings.Contains(taskLower, "ssl") || 
-	     strings.Contains(taskLower, "cert") || strings.Contains(taskLower, "qemu") ||
-	     strings.Contains(taskLower, "pypi") || strings.Contains(taskLower, "windows"):
+	case strings.Contains(taskLower, "nginx") || strings.Contains(taskLower, "ssh") ||
+		strings.Contains(taskLower, "docker") || strings.Contains(taskLower, "ssl") ||
+		strings.Contains(taskLower, "cert") || strings.Contains(taskLower, "qemu") ||
+		strings.Contains(taskLower, "pypi") || strings.Contains(taskLower, "windows"):
 		return "devops"
-	case strings.Contains(taskLower, "pytorch") || strings.Contains(taskLower, "torch") || 
-	     strings.Contains(taskLower, "tensorflow") || strings.Contains(taskLower, "model") ||
-	     strings.Contains(taskLower, "mcmc") || strings.Contains(taskLower, "stan") ||
-	     strings.Contains(taskLower, "sampling"):
+	case strings.Contains(taskLower, "pytorch") || strings.Contains(taskLower, "torch") ||
+		strings.Contains(taskLower, "tensorflow") || strings.Contains(taskLower, "model") ||
+		strings.Contains(taskLower, "mcmc") || strings.Contains(taskLower, "stan") ||
+		strings.Contains(taskLower, "sampling"):
 		return "ml"
-	case strings.Contains(taskLower, "sqlite") || strings.Contains(taskLower, "database") || 
-	     strings.Contains(taskLower, "sql"):
+	case strings.Contains(taskLower, "sqlite") || strings.Contains(taskLower, "database") ||
+		strings.Contains(taskLower, "sql"):
 		return "database"
 	case strings.Contains(taskLower, "regex") || strings.Contains(taskLower, "extract") ||
-	     strings.Contains(taskLower, "crack") || strings.Contains(taskLower, "eigenval") ||
-	     strings.Contains(taskLower, "distribution") || strings.Contains(taskLower, "query") ||
-	     strings.Contains(taskLower, "adaptive") || strings.Contains(taskLower, "install"):
+		strings.Contains(taskLower, "crack") || strings.Contains(taskLower, "eigenval") ||
+		strings.Contains(taskLower, "distribution") || strings.Contains(taskLower, "query") ||
+		strings.Contains(taskLower, "adaptive") || strings.Contains(taskLower, "install"):
 		return "simple"
 	default:
 		return "default"
@@ -324,7 +346,7 @@ func GetTaskCategory(task string) string {
 
 func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 	var toolCalls []ToolCall
-	
+
 	// === Format 0: Perl hash syntax {tool => "...", args => { --key "value" }} ===
 	if strings.Contains(response, "{tool") && strings.Contains(response, "=>") {
 		toolMatch := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`).FindStringSubmatch(response)
@@ -342,14 +364,14 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 			arguments, _ := json.Marshal(args)
 			toolCalls = append(toolCalls, ToolCall{
-				ID:       fmt.Sprintf("%s_1", toolName),
-				Name:     toolName,
+				ID:        fmt.Sprintf("%s_1", toolName),
+				Name:      toolName,
 				Arguments: arguments,
 			})
 			return toolCalls
 		}
 	}
-	
+
 	// === Format 1: [TOOL_CALL] or [ToolCall] ===
 	if strings.Contains(response, "[TOOL_CALL]") || strings.Contains(response, "[ToolCall]") || strings.Contains(response, "[tool_call]") {
 		if startIdx := strings.Index(response, "[TOOL_CALL]"); startIdx >= 0 {
@@ -364,25 +386,25 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 			if endIdx >= 0 {
 				content = content[:endIdx]
-				
+
 				// Handle remaining => syntax
 				content = strings.Replace(content, "=>", ":", -1)
-				
+
 				// Try {"tool": "...", "args": {...}}
 				var resp struct {
-					Tool string `json:"tool"`
+					Tool string                 `json:"tool"`
 					Args map[string]interface{} `json:"args"`
 				}
 				if err := json.Unmarshal([]byte(content), &resp); err == nil && resp.Tool != "" {
 					arguments, _ := json.Marshal(resp.Args)
 					toolCalls = append(toolCalls, ToolCall{
-						ID:       fmt.Sprintf("%s_1", resp.Tool),
-						Name:     resp.Tool,
+						ID:        fmt.Sprintf("%s_1", resp.Tool),
+						Name:      resp.Tool,
 						Arguments: arguments,
 					})
 					return toolCalls
 				}
-				
+
 				// Try direct args: {"tool": "...", "command": "...", ...}
 				var rawResp map[string]interface{}
 				if err := json.Unmarshal([]byte(content), &rawResp); err == nil {
@@ -395,20 +417,20 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 						}
 						arguments, _ := json.Marshal(args)
 						toolCalls = append(toolCalls, ToolCall{
-							ID:       fmt.Sprintf("%s_1", toolName),
-							Name:     toolName,
+							ID:        fmt.Sprintf("%s_1", toolName),
+							Name:      toolName,
 							Arguments: arguments,
 						})
 						return toolCalls
 					}
-					
+
 					// Try {"exec": {"command": ...}} or {"list_dir": {"path": ...}}
 					for toolName, args := range rawResp {
 						if argsMap, ok := args.(map[string]interface{}); ok {
 							arguments, _ := json.Marshal(argsMap)
 							toolCalls = append(toolCalls, ToolCall{
-								ID:       fmt.Sprintf("%s_1", toolName),
-								Name:     toolName,
+								ID:        fmt.Sprintf("%s_1", toolName),
+								Name:      toolName,
 								Arguments: arguments,
 							})
 							return toolCalls
@@ -418,17 +440,17 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 		}
 	}
-	
+
 	// === Format 2: [tool_calls]{"command": "..."}[/tool_calls] - exec without tool name ===
 	if strings.Contains(response, "[tool_calls]") {
 		if startIdx := strings.Index(response, "[tool_calls]"); startIdx >= 0 {
 			content := response[startIdx+len("[tool_calls]"):]
 			if endIdx := strings.Index(content, "[/tool_calls]"); endIdx >= 0 {
 				content = content[:endIdx]
-				
+
 				// Handle => syntax
 				content = strings.Replace(content, "=>", ":", -1)
-				
+
 				// Try {"command": "..."} - no tool name, default to "exec"
 				var execResp struct {
 					Command string `json:"command"`
@@ -437,27 +459,27 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 				if err := json.Unmarshal([]byte(content), &execResp); err == nil && execResp.Command != "" {
 					arguments, _ := json.Marshal(execResp)
 					toolCalls = append(toolCalls, ToolCall{
-						ID:       "exec_1",
-						Name:     "exec",
+						ID:        "exec_1",
+						Name:      "exec",
 						Arguments: arguments,
 					})
 					return toolCalls
 				}
-				
+
 				// Try {"list_dir": {"path": "."}} - tool name as key
 				var toolObj map[string]map[string]interface{}
 				if err := json.Unmarshal([]byte(content), &toolObj); err == nil {
 					for toolName, args := range toolObj {
 						arguments, _ := json.Marshal(args)
 						toolCalls = append(toolCalls, ToolCall{
-							ID:       fmt.Sprintf("%s_1", toolName),
-							Name:     toolName,
+							ID:        fmt.Sprintf("%s_1", toolName),
+							Name:      toolName,
 							Arguments: arguments,
 						})
 						return toolCalls
 					}
 				}
-				
+
 				// Try {"tool_name", {"key": value}} - comma syntax
 				commaMatch := regexp.MustCompile(`\{\s*"(\w+)"\s*,\s*\{([^}]+)\}\s*\}`).FindStringSubmatch(content)
 				if len(commaMatch) > 2 {
@@ -472,23 +494,23 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 					}
 					arguments, _ := json.Marshal(args)
 					toolCalls = append(toolCalls, ToolCall{
-						ID:       fmt.Sprintf("%s_1", toolName),
-						Name:     toolName,
+						ID:        fmt.Sprintf("%s_1", toolName),
+						Name:      toolName,
 						Arguments: arguments,
 					})
 					return toolCalls
 				}
-				
+
 				// Try {"name": "...", "args": {...}}
 				var nameResp struct {
-					Name string `json:"name"`
+					Name string                 `json:"name"`
 					Args map[string]interface{} `json:"args"`
 				}
 				if err := json.Unmarshal([]byte(content), &nameResp); err == nil && nameResp.Name != "" {
 					arguments, _ := json.Marshal(nameResp.Args)
 					toolCalls = append(toolCalls, ToolCall{
-						ID:       fmt.Sprintf("%s_1", nameResp.Name),
-						Name:     nameResp.Name,
+						ID:        fmt.Sprintf("%s_1", nameResp.Name),
+						Name:      nameResp.Name,
 						Arguments: arguments,
 					})
 					return toolCalls
@@ -496,7 +518,7 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 		}
 	}
-	
+
 	// === Format 3: {"tool": "...", ...} anywhere in response ===
 	// === Format 5: {"tool": "...", ...} anywhere in response ===
 	if strings.Contains(response, `"tool"`) {
@@ -511,10 +533,10 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 						braceCount--
 						if braceCount == 0 {
 							jsonStr := response[braceStart : i+1]
-							
+
 							// Handle => syntax
 							jsonStr = strings.Replace(jsonStr, "=>", ":", -1)
-							
+
 							var rawResp map[string]interface{}
 							if err := json.Unmarshal([]byte(jsonStr), &rawResp); err == nil {
 								if toolName, ok := rawResp["tool"].(string); ok && toolName != "" {
@@ -526,8 +548,8 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 									}
 									arguments, _ := json.Marshal(args)
 									toolCalls = append(toolCalls, ToolCall{
-										ID:       fmt.Sprintf("%s_1", toolName),
-										Name:     toolName,
+										ID:        fmt.Sprintf("%s_1", toolName),
+										Name:      toolName,
 										Arguments: arguments,
 									})
 									return toolCalls
@@ -540,7 +562,7 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 		}
 	}
-	
+
 	// === Format 4: Plain text with command - fallback ===
 	// Look for common command patterns in plain text
 	commandPatterns := []string{
@@ -568,15 +590,15 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 			}
 			if cmdMatch != "" {
 				toolCalls = append(toolCalls, ToolCall{
-					ID:       "exec_1",
-					Name:     "exec",
+					ID:        "exec_1",
+					Name:      "exec",
 					Arguments: json.RawMessage(fmt.Sprintf(`{"command": "%s"}`, cmdMatch)),
 				})
 				return toolCalls
 			}
 		}
 	}
-	
+
 	// === Format 4b: Additional patterns for common commands ===
 	// Match "I'll run/go version" patterns
 	runMatch := regexp.MustCompile(`(?:run|execute)\s+(?:the\s+)?(?:command\s+)?["']?([a-zA-Z0-9\s\-./_]+?)["']?(?:\s|$|\.)`).FindStringSubmatch(response)
@@ -584,14 +606,14 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 		cmd := strings.TrimSpace(runMatch[1])
 		if len(cmd) > 2 && len(cmd) < 100 {
 			toolCalls = append(toolCalls, ToolCall{
-				ID:       "exec_1",
-				Name:     "exec",
+				ID:        "exec_1",
+				Name:      "exec",
 				Arguments: json.RawMessage(fmt.Sprintf(`{"command": "%s"}`, cmd)),
 			})
 			return toolCalls
 		}
 	}
-	
+
 	return toolCalls
 }
 
@@ -622,15 +644,15 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		timeout := 30 * time.Second
 		if args.Timeout > 0 {
 			timeout = time.Duration(args.Timeout) * time.Second
 		}
-		
+
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		
+
 		cmd := exec.CommandContext(ctx, "sh", "-c", args.Command)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -648,7 +670,7 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		data, err := os.ReadFile(args.Path)
 		if err != nil {
 			result.Error = err.Error()
@@ -667,7 +689,7 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		dir := args.Path[:strings.LastIndex(args.Path, "/")]
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			result.Error = fmt.Sprintf("Failed to create directory: %v", err)
@@ -687,11 +709,11 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		if args.Path == "" {
 			args.Path = "."
 		}
-		
+
 		entries, err := os.ReadDir(args.Path)
 		if err != nil {
 			result.Error = err.Error()
@@ -719,16 +741,16 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		if args.Path == "" {
 			args.Path = "."
 		}
-		
+
 		flags := "-rHn"
 		if !args.Recursive {
 			flags = "-Hn"
 		}
-		
+
 		cmd := exec.CommandContext(ctx, "grep", flags, args.Pattern, args.Path)
 		output, err := cmd.CombinedOutput()
 		if err != nil && len(output) == 0 {
@@ -748,11 +770,11 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		
+
 		if args.Path == "" {
 			args.Path = "."
 		}
-		
+
 		cmd := exec.CommandContext(ctx, "find", args.Path, "-name", args.Pattern, "-type", "f")
 		output, err := cmd.CombinedOutput()
 		if err != nil && len(output) == 0 {
@@ -760,6 +782,36 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		} else {
 			result.Output = string(output)
 			result.Success = true
+		}
+
+	case "edit_file":
+		var args struct {
+			Path    string `json:"path"`
+			OldText string `json:"old_text"`
+			NewText string `json:"new_text"`
+		}
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			result.Error = fmt.Sprintf("Failed to parse arguments: %v", err)
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
+		data, err := os.ReadFile(args.Path)
+		if err != nil {
+			result.Error = err.Error()
+		} else {
+			content := string(data)
+			if !strings.Contains(content, args.OldText) {
+				result.Error = fmt.Sprintf("Text not found in file: %s", args.OldText)
+			} else {
+				newContent := strings.Replace(content, args.OldText, args.NewText, 1)
+				if err := os.WriteFile(args.Path, []byte(newContent), 0644); err != nil {
+					result.Error = err.Error()
+				} else {
+					result.Output = fmt.Sprintf("File edited: %s", args.Path)
+					result.Success = true
+				}
+			}
 		}
 
 	default:
