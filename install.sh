@@ -26,8 +26,8 @@
 set -e
 
 # Configuration
-REPO_OWNER="clawdbot"
-REPO_NAME="clawd"
+REPO_OWNER="jaivial"
+REPO_NAME="cli-agent"
 BINARY_NAME="eai"
 INSTALL_DIR="/usr/local/bin"
 BINARY_URL=""
@@ -421,7 +421,7 @@ To get started:
   3. Enjoy!
 
 To update later:
-  curl -fsSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/cli-agent/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/master/install.sh | bash
 
 For more information:
   https://github.com/${REPO_OWNER}/${REPO_NAME}

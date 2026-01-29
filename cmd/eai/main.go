@@ -20,7 +20,7 @@ import (
 
 const (
 	version = "1.0.0"
-	repoURL = "https://github.com/clawdbot/clawd"
+	repoURL = "https://github.com/jaivial/cli-agent"
 )
 
 func getBinaryPath() string {
