@@ -211,8 +211,8 @@ Use ↑ to go back, Enter to confirm, Ctrl+C to cancel.
 
 	content := header + "\n\n" + progressBar + "\n\n" + body + help
 
-	paddingTop := max(0, (s.height-20)/2)
-	paddingSides := max(0, (s.width-lipgloss.Width(content)-4)/2)
+	paddingTop := maxInt(0, (s.height-20)/2)
+	paddingSides := maxInt(0, (s.width-lipgloss.Width(content)-4)/2)
 
 	result := strings.Repeat("\n", paddingTop)
 	if paddingSides > 0 {
@@ -228,4 +228,12 @@ Use ↑ to go back, Enter to confirm, Ctrl+C to cancel.
 
 func (s *SetupWizard) Done() bool {
 	return s.done
+}
+
+// maxInt returns the larger of two integers (Go 1.18 compatibility)
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

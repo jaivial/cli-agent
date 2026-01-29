@@ -1,8 +1,6 @@
 module cli-agent
 
-go 1.24.0
-
-toolchain go1.24.12
+go 1.18
 
 require (
 	github.com/alecthomas/chroma v0.10.0
@@ -11,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v0.10.0
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.8.1
-	github.com/yuin/goldmark v1.7.16
+	github.com/yuin/goldmark v1.5.4
 	gopkg.in/yaml.v3 v3.0.1
 )
 

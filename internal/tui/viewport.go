@@ -15,6 +15,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Layout constants
+const (
+	sidebarWidth   = 32
+	headerHeight   = 3
+	statusHeight   = 1
+	inputHeight    = 5
+	minWidth       = 80
+	minHeight      = 24
+)
+
 type MainModel struct {
 	app         *app.Application
 	mode        app.Mode
@@ -29,6 +39,7 @@ type MainModel struct {
 	loadingText string
 	spinnerPos  int
 	modeIndex   int
+	ready       bool
 }
 
 type Message struct {
@@ -56,11 +67,14 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	ta.SetWidth(60)
 	ta.SetHeight(3)
 	ta.Prompt = "▍ "
+	ta.ShowLineNumbers = false
 
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Background(lipgloss.Color(colorBgAlt))
+	ta.BlurredStyle.Base = lipgloss.NewStyle().Background(lipgloss.Color(colorBgAlt))
 
 	modeIndex := 0
 	for i, m := range modes {
@@ -82,6 +96,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 		markdown:    NewMarkdownRenderer(),
 		loading:     false,
 		loadingText: "Thinking...",
+		ready:       false,
 	}
 
 	m.messages = append(m.messages, Message{
@@ -98,6 +113,14 @@ func (m *MainModel) Init() tea.Cmd {
 	return textarea.Blink
 }
 
+func (m *MainModel) chatAreaWidth() int {
+	return m.width - sidebarWidth - 4
+}
+
+func (m *MainModel) chatAreaHeight() int {
+	return m.height - headerHeight - statusHeight - inputHeight - 2
+}
+
 func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -105,10 +128,22 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport = viewport.New(msg.Width-38, msg.Height-14)
-		m.viewport.Style = viewportStyle
-		m.input.SetWidth(msg.Width - 38)
-		m.help.SetWidth(msg.Width)
+
+		chatWidth := m.chatAreaWidth()
+		chatHeight := m.chatAreaHeight()
+
+		if !m.ready {
+			m.viewport = viewport.New(chatWidth, chatHeight)
+			m.viewport.Style = lipgloss.NewStyle().
+				Background(lipgloss.Color(colorBg))
+			m.ready = true
+		} else {
+			m.viewport.Width = chatWidth
+			m.viewport.Height = chatHeight
+		}
+
+		m.input.SetWidth(chatWidth - 4)
+		m.help.SetWidth(m.width)
 		m.updateViewport()
 		return m, nil
 
@@ -186,6 +221,14 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			m.updateViewport()
 			return m, nil
+
+		case msg.Type == tea.KeyPgUp:
+			m.viewport.ViewUp()
+			return m, nil
+
+		case msg.Type == tea.KeyPgDown:
+			m.viewport.ViewDown()
+			return m, nil
 		}
 
 	case aiResponseMsg:
@@ -220,211 +263,313 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
-	m.updateViewport()
+
+	m.viewport, cmd = m.viewport.Update(msg)
+	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m *MainModel) updateViewport() {
 	var b strings.Builder
+	chatWidth := m.chatAreaWidth() - 4
 
 	for _, msg := range m.messages {
-		b.WriteString(renderMessage(msg, m.markdown, m.width-42))
-		b.WriteString("\n")
+		b.WriteString(m.renderMessage(msg, chatWidth))
+		b.WriteString("\n\n")
 	}
 
 	if m.loading {
 		sp := spinner[m.spinnerPos]
-		b.WriteString(loadingStyle.Width(m.width - 42).Render(fmt.Sprintf("%s %s", sp, m.loadingText)))
+		loadingBox := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#60A5FA")).
+			Background(lipgloss.Color(colorBgAlt)).
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#60A5FA")).
+			Width(chatWidth).
+			Render(fmt.Sprintf("%s %s", sp, m.loadingText))
+		b.WriteString(loadingBox)
+		b.WriteString("\n")
 	}
 
 	m.viewport.SetContent(b.String())
 }
 
-func renderMessage(msg Message, md *MarkdownRenderer, width int) string {
-	var bubbleStyle lipgloss.Style
+func (m *MainModel) renderMessage(msg Message, width int) string {
+	var headerBg lipgloss.Color
 	var roleLabel string
+	var bodyBg lipgloss.Color
+	var bodyFg lipgloss.Color
 
 	switch msg.Role {
 	case "user":
-		bubbleStyle = userBubbleStyle
+		headerBg = lipgloss.Color("#3B82F6")
+		bodyBg = lipgloss.Color("#1E3A5F")
+		bodyFg = lipgloss.Color("#E0F2FE")
 		roleLabel = "You"
 	case "assistant":
-		bubbleStyle = aiBubbleStyle
+		headerBg = lipgloss.Color("#10B981")
+		bodyBg = lipgloss.Color("#1E3B32")
+		bodyFg = lipgloss.Color("#D1FAE5")
 		roleLabel = "AI"
 	case "system":
-		bubbleStyle = systemBubbleStyle
+		headerBg = lipgloss.Color("#6B7280")
+		bodyBg = lipgloss.Color("#1E293B")
+		bodyFg = lipgloss.Color("#F59E0B")
 		roleLabel = "System"
 	case "error":
-		bubbleStyle = errorBubbleStyle
+		headerBg = lipgloss.Color("#EF4444")
+		bodyBg = lipgloss.Color("#451A1A")
+		bodyFg = lipgloss.Color("#FEE2E2")
 		roleLabel = "Error"
 	default:
-		bubbleStyle = systemBubbleStyle
+		headerBg = lipgloss.Color("#6B7280")
+		bodyBg = lipgloss.Color("#1E293B")
+		bodyFg = lipgloss.Color("#F8FAFC")
 		roleLabel = msg.Role
 	}
 
 	timestamp := msg.Timestamp.Format("15:04")
-	header := fmt.Sprintf(" %s • %s ", roleLabel, timestamp)
+	headerText := fmt.Sprintf(" %s  %s ", roleLabel, timestamp)
 
-	headerStyle := lipgloss.NewStyle().
+	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(bubbleStyle.GetBackground()).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(headerBg).
 		Padding(0, 1).
 		Width(width).
-		Render(header)
+		Render(headerText)
 
 	content := msg.Content
 	if msg.Role == "assistant" {
-		content = md.Render(msg.Content, width-4)
+		content = m.markdown.Render(msg.Content, width-4)
 	}
 
-	body := bubbleStyle.Width(width).Render(content)
+	body := lipgloss.NewStyle().
+		Foreground(bodyFg).
+		Background(bodyBg).
+		Padding(1, 2).
+		Width(width).
+		Render(content)
 
-	return headerStyle + "\n" + body
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
 func (m *MainModel) View() string {
-	if m.width < 80 || m.height < 20 {
-		return m.minimalView()
+	if m.width < minWidth || m.height < minHeight {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F59E0B")).
+			Bold(true).
+			Padding(2).
+			Render(fmt.Sprintf("Please resize terminal to at least %dx%d\nCurrent: %dx%d", minWidth, minHeight, m.width, m.height))
 	}
 
-	var b strings.Builder
+	if !m.ready {
+		return "Initializing..."
+	}
 
-	b.WriteString(renderHeader(m.width))
-	b.WriteString("\n")
+	// Build the layout
+	header := m.renderHeader()
+	mainContent := m.renderMainContent()
+	statusBar := m.renderStatusBar()
+	inputArea := m.renderInputArea()
 
-	b.WriteString(renderMainArea(m))
-	b.WriteString("\n")
-
-	b.WriteString(renderSidebar(m.width, m.height, len(m.messages), m.modeIndex))
-	b.WriteString("\n")
-
-	b.WriteString(renderStatusBar(m.width, string(m.mode)))
-	b.WriteString("\n")
-
-	b.WriteString(renderInput(m.input, m.width-36))
-
-	return b.String()
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		mainContent,
+		statusBar,
+		inputArea,
+	)
 }
 
-func (m *MainModel) minimalView() string {
-	return fmt.Sprintf("Resize terminal to at least 80x24. Current: %dx%d", m.width, m.height)
-}
-
-func renderHeader(width int) string {
-	header := lipgloss.NewStyle().
+func (m *MainModel) renderHeader() string {
+	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
+		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#7D56F4")).
-		Padding(0, 2).
-		Width(width - 4).
-		Render(" eai CLI Agent ")
+		Padding(0, 2)
+
+	title := titleStyle.Render(" eai CLI Agent ")
+
+	modeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#4C1D95")).
+		Padding(0, 1)
+
+	modeText := modeStyle.Render(fmt.Sprintf(" %s ", strings.ToUpper(string(m.mode))))
+
+	headerContent := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", modeText)
 
 	border := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#7D56F4")).
-		Render(strings.Repeat("━", width-4))
+		Render(strings.Repeat("─", m.width))
 
-	return lipgloss.NewStyle().
-		Width(width).
-		Render(header + "\n" + border)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().
+			Width(m.width).
+			Background(lipgloss.Color("#0F172A")).
+			Padding(0, 1).
+			Render(headerContent),
+		border,
+	)
 }
 
-func renderMainArea(m *MainModel) string {
-	chatArea := lipgloss.NewStyle().
-		Width(m.width - 36).
-		Height(m.height - 12).
+func (m *MainModel) renderMainContent() string {
+	chatWidth := m.chatAreaWidth()
+
+	// Chat area with border
+	chatBox := lipgloss.NewStyle().
+		Width(chatWidth).
+		Height(m.chatAreaHeight()).
+		Background(lipgloss.Color(colorBg)).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(colorBorder)).
 		Render(m.viewport.View())
 
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorFg)).
-		Background(lipgloss.Color(colorBg)).
-		Render(chatArea)
+	// Sidebar
+	sidebar := m.renderSidebar()
+
+	// Join horizontally
+	return lipgloss.JoinHorizontal(lipgloss.Top, chatBox, sidebar)
 }
 
-func renderSidebar(width, height, msgCount, modeIndex int) string {
-	sidebarWidth := 34
-
+func (m *MainModel) renderSidebar() string {
 	var b strings.Builder
-	b.WriteString(sidebarTitle.Render(" Context "))
+
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#7D56F4")).
+		Padding(0, 1).
+		Width(sidebarWidth - 4)
+
+	b.WriteString(titleStyle.Render(" Context "))
 	b.WriteString("\n\n")
 
-	b.WriteString(sidebarSection.Render("Messages"))
-	b.WriteString(fmt.Sprintf("  %d\n\n", msgCount))
+	// Section style
+	sectionStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#4ECDC4"))
 
-	b.WriteString(sidebarSection.Render("Shortcuts"))
-	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  %s  Send message\n", keyStyle.Render("Enter")))
-	b.WriteString(fmt.Sprintf("  %s  Switch mode\n", keyStyle.Render("Shift+Tab")))
-	b.WriteString(fmt.Sprintf("  %s  Clear chat\n", keyStyle.Render("x")))
-	b.WriteString(fmt.Sprintf("  %s  Show help\n", keyStyle.Render("?")))
-	b.WriteString(fmt.Sprintf("  %s  Quit\n", keyStyle.Render("q")))
+	// Messages count
+	b.WriteString(sectionStyle.Render("Messages"))
+	b.WriteString(fmt.Sprintf("\n  %d\n\n", len(m.messages)))
 
+	// Shortcuts
+	b.WriteString(sectionStyle.Render("Shortcuts"))
 	b.WriteString("\n")
-	b.WriteString(sidebarSection.Render("Modes"))
-	b.WriteString("\n")
-	for i, mode := range []string{"Plan", "Code", "Do"} {
-		marker := "○"
-		if i == modeIndex {
-			marker = "●"
-		}
-		current := ""
-		if i == modeIndex {
-			current = " (current)"
-		}
-		b.WriteString(fmt.Sprintf("  %s %s%s\n", marker, mode, current))
+
+	keyStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF6B6B")).
+		Background(lipgloss.Color("#1E293B")).
+		Padding(0, 1)
+
+	shortcuts := []struct {
+		key  string
+		desc string
+	}{
+		{"Enter", "Send"},
+		{"Shift+Tab", "Mode"},
+		{"x", "Clear"},
+		{"?", "Help"},
+		{"q", "Quit"},
+	}
+
+	for _, s := range shortcuts {
+		b.WriteString(fmt.Sprintf("  %s %s\n", keyStyle.Render(s.key), s.desc))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(sidebarSection.Render("Commands"))
+	b.WriteString(sectionStyle.Render("Modes"))
 	b.WriteString("\n")
-	b.WriteString("  /connect  Configure\n")
 
-	content := b.String()
+	modeNames := []string{"Plan", "Code", "Do"}
+	for i, mode := range modeNames {
+		marker := "○"
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(colorFgMuted))
+		if i == m.modeIndex {
+			marker = "●"
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
+		}
+		b.WriteString(style.Render(fmt.Sprintf("  %s %s\n", marker, mode)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("Commands"))
+	b.WriteString("\n")
+	b.WriteString("  /connect  Setup API\n")
 
 	return lipgloss.NewStyle().
 		Width(sidebarWidth).
-		Height(height-10).
+		Height(m.chatAreaHeight()).
 		Foreground(lipgloss.Color(colorFgMuted)).
 		Background(lipgloss.Color(colorBgAlt)).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(1, 1).
-		Render(content)
+		Render(b.String())
 }
 
-func renderStatusBar(width int, mode string) string {
-	left := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color(colorBgAlt)).
-		Padding(0, 1).
-		Render(fmt.Sprintf(" eai | %s ", strings.ToUpper(mode)))
+func (m *MainModel) renderStatusBar() string {
+	leftStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#334155")).
+		Padding(0, 1)
 
-	right := lipgloss.NewStyle().
+	rightStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colorFgMuted)).
-		Background(lipgloss.Color(colorBgAlt)).
-		Padding(0, 1).
-		Render(time.Now().Format("15:04"))
+		Background(lipgloss.Color("#334155")).
+		Padding(0, 1)
 
-	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorBorder)).
-		Render("│")
+	left := leftStyle.Render(fmt.Sprintf(" eai | %s ", strings.ToUpper(string(m.mode))))
 
-	middle := strings.Repeat(" ", width-4-lipgloss.Width(left)-lipgloss.Width(right)-2)
+	scrollInfo := ""
+	if m.viewport.TotalLineCount() > m.viewport.Height {
+		scrollInfo = fmt.Sprintf(" Scroll: %d%% ", int(m.viewport.ScrollPercent()*100))
+	}
 
-	return lipgloss.NewStyle().
-		Width(width).
+	right := rightStyle.Render(scrollInfo + time.Now().Format("15:04"))
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+
+	middle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#334155")).
+		Render(strings.Repeat(" ", gap))
+
+	return left + middle + right
+}
+
+func (m *MainModel) renderInputArea() string {
+	inputWidth := m.chatAreaWidth()
+
+	inputBox := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colorFg)).
 		Background(lipgloss.Color(colorBgAlt)).
-		Render(left + separator + middle + separator + right)
-}
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(colorPrimary)).
+		Width(inputWidth).
+		Render(m.input.View())
 
-func renderInput(input textarea.Model, width int) string {
-	return inputStyle.Width(width).Render(input.View())
+	// Hint text
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colorFgMuted)).
+		Width(sidebarWidth).
+		Padding(1, 1).
+		Render("PgUp/PgDn to scroll")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, inputBox, hint)
 }
 
 func (m *MainModel) spinTick() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(_ time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*80, func(_ time.Time) tea.Msg {
 		return spinMsg{}
 	})
 }
@@ -442,6 +587,7 @@ func (m *MainModel) sendMessage(query string) tea.Cmd {
 	}
 }
 
+// Color constants
 const (
 	colorBg         = "#0F172A"
 	colorBgAlt      = "#1E293B"
@@ -453,64 +599,4 @@ const (
 	colorAccent     = "#06B6D4"
 	colorCodeBg     = "#1E293B"
 	colorCodeBorder = "#334155"
-)
-
-var (
-	viewportStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorFg)).
-			Background(lipgloss.Color(colorBg)).
-			Padding(0, 1)
-
-	userBubbleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#3B82F6")).
-			Padding(1, 2).
-			Width(80)
-
-	aiBubbleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#10B981")).
-			Padding(1, 2).
-			Width(80)
-
-	systemBubbleStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).
-				Background(lipgloss.Color("#1E293B")).
-				Padding(1, 2).
-				Width(80)
-
-	errorBubbleStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FAFAFA")).
-				Background(lipgloss.Color("#EF4444")).
-				Padding(1, 2).
-				Width(80)
-
-	loadingStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#60A5FA")).
-			Padding(1, 1)
-
-	inputStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorFg)).
-			Background(lipgloss.Color(colorBgAlt)).
-			Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(colorBorder))
-
-	sidebarTitle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1).
-			Width(30)
-
-	sidebarSection = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Width(30)
-
-	keyStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FF6B6B")).
-			Background(lipgloss.Color("#1E293B")).
-			Padding(0, 1)
 )
