@@ -1,0 +1,16 @@
+[project]
+name = "eai-harbor-adapter"
+version = "0.1.0"
+description = "Harbor adapter for EAI CLI agent"
+requires-python = ">=3.12"
+dependencies = ["harbor", "pyyaml"]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "mypy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["eai_agent"]

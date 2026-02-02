@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(go build:*)",
+      "Bash(go version:*)",
+      "Bash(go get:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(timeout:*)"
+    ]
+  }
+}

@@ -62,8 +62,8 @@ func NewMarkdownRenderer() *MarkdownRenderer {
 
 	return &MarkdownRenderer{
 		Markdown:  md,
-		formatter: formatters.Get("terminal256"),
-		style:     styles.Get("dracula"),
+		formatter: formatters.Get("terminal16m"),
+		style:     styles.Get("native"),
 	}
 }
 
@@ -80,7 +80,7 @@ func (r *MarkdownRenderer) Render(content string, width int) string {
 	return r.formatForTerminal(buf.String(), width)
 }
 
-// formatForTerminal formats HTML for terminal output
+// formatForTerminal formats HTML for terminal output - TEXT ONLY, NO BOXES
 func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) string {
 	result := htmlContent
 
@@ -95,30 +95,23 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		lang := matches[1]
 		code := r.decodeHTMLEntities(matches[2])
 
-		// Render with syntax highlighting
+		// Render with syntax highlighting - just the code, no box
 		highlighted := r.RenderCodeBlock(code, lang)
 
-		// Style the code block with dynamic width
-		codeWidth := width - 8
-		if codeWidth < 20 {
-			codeWidth = 20
-		}
-
-		styled := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F8F8F2")).
-			Background(lipgloss.Color("#282A36")).
-			Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#6272A4")).
-			Width(codeWidth).
-			Render(highlighted)
+		// Add a simple prefix to indicate code block
+		var styled strings.Builder
+		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("```" + lang))
+		styled.WriteString("\n")
+		styled.WriteString(highlighted)
+		styled.WriteString("\n")
+		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("```"))
 
 		index := len(codeBlocks)
-		codeBlocks = append(codeBlocks, styled)
+		codeBlocks = append(codeBlocks, styled.String())
 		return fmt.Sprintf("\n{{CODE_BLOCK_%d}}\n", index)
 	})
 
-	// Handle inline code
+	// Handle inline code - just colored text
 	result = inlineCodeRe.ReplaceAllStringFunc(result, func(m string) string {
 		matches := inlineCodeRe.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -126,13 +119,11 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		code := r.decodeHTMLEntities(matches[1])
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F8F8F2")).
-			Background(lipgloss.Color("#44475A")).
-			Padding(0, 1).
-			Render(code)
+			Foreground(lipgloss.Color("#FF79C6")).
+			Render("`" + code + "`")
 	})
 
-	// Replace headers
+	// Replace headers - just bold colored text
 	result = h1Regex.ReplaceAllStringFunc(result, func(m string) string {
 		matches := h1Regex.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -141,11 +132,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		return lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#BD93F9")).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(lipgloss.Color("#6272A4")).
-			Width(width - 4).
-			Render(matches[1]) + "\n"
+			Render("# "+matches[1]) + "\n"
 	})
 
 	result = h2Regex.ReplaceAllStringFunc(result, func(m string) string {
@@ -156,8 +143,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		return lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#FF79C6")).
-			Width(width - 4).
-			Render(matches[1]) + "\n"
+			Render("## "+matches[1]) + "\n"
 	})
 
 	result = h3Regex.ReplaceAllStringFunc(result, func(m string) string {
@@ -168,11 +154,10 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		return lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#8BE9FD")).
-			Width(width - 4).
-			Render(matches[1]) + "\n"
+			Render("### "+matches[1]) + "\n"
 	})
 
-	// Replace bold
+	// Replace bold - just bold text
 	result = strongRegex.ReplaceAllStringFunc(result, func(m string) string {
 		matches := strongRegex.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -196,7 +181,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 			Render(matches[1])
 	})
 
-	// Replace links
+	// Replace links - just underlined text
 	result = linkRegex.ReplaceAllStringFunc(result, func(m string) string {
 		matches := linkRegex.FindStringSubmatch(m)
 		if len(matches) < 3 {
@@ -205,10 +190,12 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#8BE9FD")).
 			Underline(true).
-			Render(fmt.Sprintf("%s (%s)", matches[2], matches[1]))
+			Render(matches[2]) + " " + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6272A4")).
+			Render("("+matches[1]+")")
 	})
 
-	// Replace blockquotes
+	// Replace blockquotes - just prefixed text
 	result = blockquoteRe.ReplaceAllStringFunc(result, func(m string) string {
 		matches := blockquoteRe.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -218,15 +205,10 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		content = htmlTagRegex.ReplaceAllString(content, "")
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6272A4")).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderLeft(true).
-			BorderForeground(lipgloss.Color("#BD93F9")).
-			PaddingLeft(2).
-			Width(width - 4).
-			Render(content) + "\n"
+			Render("> "+content) + "\n"
 	})
 
-	// Replace unordered lists
+	// Replace unordered lists - just bullet points
 	result = ulRegex.ReplaceAllStringFunc(result, func(m string) string {
 		matches := ulRegex.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -239,7 +221,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 				itemContent := htmlTagRegex.ReplaceAllString(item[1], "")
 				list.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("#50FA7B")).
-					Render("  "))
+					Render("• "))
 				list.WriteString(itemContent)
 				list.WriteString("\n")
 			}
@@ -247,7 +229,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		return list.String()
 	})
 
-	// Replace ordered lists
+	// Replace ordered lists - just numbered
 	result = olRegex.ReplaceAllStringFunc(result, func(m string) string {
 		matches := olRegex.FindStringSubmatch(m)
 		if len(matches) < 2 {
@@ -260,8 +242,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 				itemContent := htmlTagRegex.ReplaceAllString(item[1], "")
 				list.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("#FFB86C")).
-					Bold(true).
-					Render(fmt.Sprintf("  %d. ", i+1)))
+					Render(fmt.Sprintf("%d. ", i+1)))
 				list.WriteString(itemContent)
 				list.WriteString("\n")
 			}

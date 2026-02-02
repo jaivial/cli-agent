@@ -27,75 +27,38 @@ func (m *helpModel) SetWidth(width int) {
 func (m helpModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(helpTitleStyle.Render("CLI Agent Help"))
+	b.WriteString(helpTitleStyle.Render("eai help"))
 	b.WriteString("\n\n")
 
-	b.WriteString(helpSectionStyle.Render("Main Commands"))
+	b.WriteString(helpSectionStyle.Render("commands"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(" %s %s Send message\n",
-		helpKeyStyle.Render(m.keys.Enter.Help().Key),
-		helpDescriptionStyle.Render("Send message")))
-	b.WriteString(fmt.Sprintf(" %s %s Clear chat history\n",
-		helpKeyStyle.Render(m.keys.Clear.Help().Key),
-		helpDescriptionStyle.Render("Clear chat history")))
-	b.WriteString(fmt.Sprintf(" %s %s Quit application\n",
-		helpKeyStyle.Render(m.keys.Quit.Help().Key),
-		helpDescriptionStyle.Render("Quit application")))
+	b.WriteString(fmt.Sprintf("  %s  send message\n", helpKeyStyle.Render("enter")))
+	b.WriteString(fmt.Sprintf("  %s  switch mode\n", helpKeyStyle.Render("shift+tab")))
+	b.WriteString(fmt.Sprintf("  %s  clear chat\n", helpKeyStyle.Render("x")))
+	b.WriteString(fmt.Sprintf("  %s  quit\n", helpKeyStyle.Render("q")))
 
 	b.WriteString("\n")
 
-	b.WriteString(helpSectionStyle.Render("Modes"))
+	b.WriteString(helpSectionStyle.Render("modes"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(" %s %s Cycle through modes (plan/code/act)\n",
-		helpKeyStyle.Render(m.keys.NextMode.Help().Key),
-		helpDescriptionStyle.Render("Switch mode")))
-	b.WriteString(fmt.Sprintf(" Current mode: %s\n",
-		helpDescriptionStyle.Render("plan | code | act")))
-
+	b.WriteString(helpDescriptionStyle.Render("  plan - planning and analysis"))
 	b.WriteString("\n")
-
-	b.WriteString(helpSectionStyle.Render("Configuration"))
+	b.WriteString(helpDescriptionStyle.Render("  code - code generation"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(" %s %s Configure API provider\n",
-		helpKeyStyle.Render("/connect"),
-		helpDescriptionStyle.Render("Open setup wizard for MiniMax API key")))
-	b.WriteString(helpDescriptionStyle.Render("   • Choose provider (MiniMax)"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("   • Enter API key"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("   • Select model (minimax-m2.1)"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("   • Config saved locally to settings.json"))
+	b.WriteString(helpDescriptionStyle.Render("  do   - execute actions"))
 	b.WriteString("\n")
 
 	b.WriteString("\n")
 
-	b.WriteString(helpSectionStyle.Render("Input Tips"))
+	b.WriteString(helpSectionStyle.Render("setup"))
 	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("• Type your message and press Enter to send"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("• Use Shift+Enter for new lines"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("• Character limit: 8000 characters"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("• Type /connect to configure your API key"))
+	b.WriteString(helpDescriptionStyle.Render("  /connect  configure api key"))
 	b.WriteString("\n")
 
 	b.WriteString("\n")
+	b.WriteString(helpFooterStyle.Render("q quit | shift+tab mode | enter send"))
 
-	b.WriteString(helpSectionStyle.Render("About"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("A modern AI CLI agent with enhanced TUI interface"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("Features markdown rendering with syntax highlighting"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("and smooth animations for better user experience."))
-	b.WriteString("\n")
-
-	b.WriteString("\n")
-	b.WriteString(helpFooterStyle.Render("Press q to quit | Shift+Tab to switch mode | Enter to send"))
-
-	return helpStyle.Width(m.width).Render(b.String())
+	return b.String()
 }
 
 type keyMap struct {
@@ -136,44 +99,23 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Minimal transparent styles
 var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderBottomForeground(lipgloss.Color("#7D56F4")).
-			Padding(0, 1).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("#FFB86C"))
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#4ECDC4")).
-				Background(lipgloss.Color("#1A1A2E")).
-				Width(80)
+				Foreground(lipgloss.Color("#BD93F9"))
 
 	helpKeyStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FF6B6B")).
-			Background(lipgloss.Color("#1A1A2E")).
-			Padding(0, 2).
-			Width(15)
+			Foreground(lipgloss.Color("#FF79C6"))
 
 	helpDescriptionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#E0E0E0")).
-				Background(lipgloss.Color("#1A1A2E")).
-				Width(60)
+				Foreground(lipgloss.Color("#6272A4"))
 
 	helpFooterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
-			Background(lipgloss.Color("#1A1A2E")).
-			Italic(true).
-			Width(80)
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#94A3B8")).
-			Background(lipgloss.Color("#0F172A")).
-			Padding(0, 3).
-			Width(80)
+			Foreground(lipgloss.Color("#44475A")).
+			Italic(true)
 )

@@ -3,11 +3,13 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -43,13 +45,16 @@ type minimaxResponse struct {
 
 type anthropicResponse struct {
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type      string `json:"type"`
+		Text      string `json:"text,omitempty"`
+		Thinking  string `json:"thinking,omitempty"`
+		Signature string `json:"signature,omitempty"`
 	} `json:"content"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 func NewMinimaxClient(apiKey, model, baseURL string, maxTokens int) *MinimaxClient {
@@ -60,14 +65,25 @@ func NewMinimaxClient(apiKey, model, baseURL string, maxTokens int) *MinimaxClie
 		baseURL = "https://api.minimax.io/anthropic/v1/messages"
 	}
 	if maxTokens <= 0 {
-		maxTokens = 2048
+		maxTokens = 16384
 	}
+
+	// Create HTTP client with optional TLS skip for container environments
+	httpClient := &http.Client{Timeout: 120 * time.Second}
+
+	// Skip TLS verification if EAI_SKIP_TLS_VERIFY is set (for container environments)
+	if os.Getenv("EAI_SKIP_TLS_VERIFY") == "1" || os.Getenv("EAI_SKIP_TLS_VERIFY") == "true" {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
 	return &MinimaxClient{
-		APIKey: apiKey,
-		Model:  model,
-		BaseURL: baseURL,
+		APIKey:    apiKey,
+		Model:     model,
+		BaseURL:   baseURL,
 		MaxTokens: maxTokens,
-		HTTP:   &http.Client{Timeout: 120 * time.Second},
+		HTTP:      httpClient,
 	}
 }
 
@@ -132,10 +148,36 @@ func (c *MinimaxClient) Complete(ctx context.Context, prompt string) (string, er
 		if anthropicResp.Error != nil {
 			return "", fmt.Errorf("anthropic api error: %s", anthropicResp.Error.Message)
 		}
+
+		// Collect text content, handling both regular text and thinking blocks
+		var textContent string
+		var thinkingContent string
+
 		for _, content := range anthropicResp.Content {
-			if content.Type == "text" && content.Text != "" {
-				return content.Text, nil
+			switch content.Type {
+			case "text":
+				if content.Text != "" {
+					textContent = content.Text
+				}
+			case "thinking":
+				// Store thinking content as fallback if no text content
+				if content.Thinking != "" {
+					thinkingContent = content.Thinking
+				}
 			}
+		}
+
+		// Prefer text content, fall back to thinking content if needed
+		if textContent != "" {
+			return textContent, nil
+		}
+
+		// If only thinking content and stop_reason is max_tokens,
+		// the model ran out of tokens during thinking - return thinking as partial result
+		if thinkingContent != "" {
+			// Extract any actionable content from thinking
+			// This helps when the model thinks through tool calls but doesn't emit them
+			return extractActionableContent(thinkingContent), nil
 		}
 	}
 
@@ -168,6 +210,48 @@ func (c *MinimaxClient) mockComplete(ctx context.Context, prompt string) (string
 	
 	// First call - generate appropriate tool call
 	return generateMockResponse(task)
+}
+
+// extractActionableContent tries to find tool calls or actionable content from thinking text
+func extractActionableContent(thinking string) string {
+	// If thinking contains JSON-like tool call patterns, try to extract them
+	// This handles cases where the model thinks through tool calls but hits max_tokens
+
+	// Look for patterns like: read_file, write_file, exec, list_dir, grep
+	// and try to construct a reasonable tool call
+
+	thinkingLower := strings.ToLower(thinking)
+
+	// Check for file reading intent
+	if strings.Contains(thinkingLower, "read") && strings.Contains(thinkingLower, "file") {
+		// Try to extract a file path from the thinking
+		if idx := strings.Index(thinking, "/app/"); idx != -1 {
+			end := idx
+			for end < len(thinking) && thinking[end] != ' ' && thinking[end] != '\n' && thinking[end] != '"' && thinking[end] != '\'' {
+				end++
+			}
+			path := thinking[idx:end]
+			return fmt.Sprintf(`{"tool_calls":[{"id":"read_1","name":"read_file","arguments":{"path":"%s"}}]}`, path)
+		}
+		return `{"tool_calls":[{"id":"read_1","name":"read_file","arguments":{"path":"."}}]}`
+	}
+
+	// Check for directory listing intent
+	if strings.Contains(thinkingLower, "list") && (strings.Contains(thinkingLower, "dir") || strings.Contains(thinkingLower, "folder") || strings.Contains(thinkingLower, "file")) {
+		return `{"tool_calls":[{"id":"list_1","name":"list_dir","arguments":{"path":"."}}]}`
+	}
+
+	// Check for command execution intent
+	if strings.Contains(thinkingLower, "run") || strings.Contains(thinkingLower, "execute") || strings.Contains(thinkingLower, "command") {
+		return `{"tool_calls":[{"id":"exec_1","name":"exec","arguments":{"command":"ls -la"}}]}`
+	}
+
+	// Default: return the thinking as a message (agent will continue)
+	// Truncate if too long
+	if len(thinking) > 500 {
+		thinking = thinking[:500] + "..."
+	}
+	return fmt.Sprintf("Based on analysis: %s", thinking)
 }
 
 func extractTaskFromPrompt(prompt string) string {

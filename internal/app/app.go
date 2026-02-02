@@ -80,3 +80,9 @@ func (a *Application) RunCommand(ctx context.Context, command string, background
 	code, err := a.Runner.Run(ctx, command)
 	return Job{}, code, err
 }
+
+// ReloadClient updates the client with new configuration
+func (a *Application) ReloadClient(cfg Config) {
+	a.Config = cfg
+	a.Client = NewMinimaxClient(cfg.MinimaxAPIKey, cfg.Model, cfg.BaseURL, cfg.MaxTokens)
+}

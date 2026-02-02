@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,31 +11,28 @@ import (
 )
 
 type SetupWizard struct {
-	step      int
-	provider  string
 	apiKey    string
-	model     string
 	statusMsg string
 	input     textinput.Model
 	done      bool
+	saved     bool
 	cfg       *app.Config
 	width     int
 	height    int
-	providers []string
-	selected  int
 }
 
 func NewSetupWizard(cfg *app.Config) *SetupWizard {
-	s := &SetupWizard{
-		step:      0,
-		providers: []string{"MiniMax"},
-		selected:  0,
-		cfg:       cfg,
-		input:     textinput.New(),
+	ti := textinput.New()
+	ti.Placeholder = "paste your api key here..."
+	ti.Focus()
+	ti.Width = 50
+	ti.EchoMode = textinput.EchoPassword
+	ti.EchoCharacter = '•'
+
+	return &SetupWizard{
+		cfg:   cfg,
+		input: ti,
 	}
-	s.input.Placeholder = "sk-cp-..."
-	s.input.Focus()
-	return s
 }
 
 func (s *SetupWizard) Init() tea.Cmd {
@@ -54,61 +50,31 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return s, tea.Quit
 
 		case "enter":
-			switch s.step {
-			case 0:
-				s.provider = s.providers[s.selected]
-				s.step = 1
-				s.input.Focus()
-			case 1:
-				s.apiKey = s.input.Value()
-				if s.apiKey == "" {
-					s.statusMsg = "Please enter an API key"
-					break
-				}
-				if !strings.HasPrefix(s.apiKey, "sk-") && !strings.HasPrefix(s.apiKey, "sk-cp-") {
-					s.statusMsg = "Warning: API key doesn't look like a MiniMax key (should start with sk-)"
-				}
-				s.step = 2
-			case 2:
-				s.model = "minimax-m2.1"
-				s.step = 3
-			case 3:
-				s.cfg.MinimaxAPIKey = s.apiKey
-				s.cfg.Model = s.model
-				s.cfg.BaseURL = "https://api.minimax.io/anthropic/v1/messages"
-				s.cfg.MaxTokens = 2048
-				s.cfg.Installed = true
-
-				if err := app.SaveConfig(*s.cfg, ""); err != nil {
-					s.statusMsg = fmt.Sprintf("Error saving config: %v", err)
-				} else {
-					s.statusMsg = "Configuration saved successfully!"
-					s.done = true
-					return s, tea.Quit
-				}
+			s.apiKey = strings.TrimSpace(s.input.Value())
+			if s.apiKey == "" {
+				s.statusMsg = "api key cannot be empty"
+				return s, nil
 			}
 
-		case "up", "k":
-			if s.step == 0 && s.selected > 0 {
-				s.selected--
-			} else if s.step > 0 {
-				s.step--
-				if s.step == 0 {
-					s.selected = 0
-				}
+			// Save config
+			s.cfg.MinimaxAPIKey = s.apiKey
+			s.cfg.Model = "minimax-m2.1"
+			s.cfg.BaseURL = "https://api.minimax.io/anthropic/v1/messages"
+			s.cfg.MaxTokens = 2048
+			s.cfg.Installed = true
+
+			if err := app.SaveConfig(*s.cfg, ""); err != nil {
+				s.statusMsg = "failed to save: " + err.Error()
+				return s, nil
 			}
-		case "down", "j":
-			if s.step == 0 && s.selected < len(s.providers)-1 {
-				s.selected++
-			} else if s.step < 3 {
-				s.step++
-			}
+
+			s.saved = true
+			s.done = true
+			return s, tea.Quit
 
 		default:
-			if s.step == 1 {
-				s.input, cmd = s.input.Update(msg)
-				return s, cmd
-			}
+			s.input, cmd = s.input.Update(msg)
+			return s, cmd
 		}
 
 	case tea.WindowSizeMsg:
@@ -116,6 +82,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.height = msg.Height
 	}
 
+	s.input, cmd = s.input.Update(msg)
 	return s, cmd
 }
 
@@ -124,116 +91,56 @@ func (s *SetupWizard) View() string {
 		return ""
 	}
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#7D56F4")).
-		Padding(0, 2).
-		Width(s.width - 4).
-		Render("  EAI Setup Wizard  ")
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFB86C")).
+		Bold(true)
 
-	var body string
-	var progressBar string
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6272A4"))
 
-	switch s.step {
-	case 0:
-		progressBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Render("▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
-		options := ""
-		for i, p := range s.providers {
-			marker := "○"
-			if i == s.selected {
-				marker = "●"
-			}
-			options += fmt.Sprintf("  %s %s\n", marker, p)
-		}
-		body = fmt.Sprintf(`
-Step 1 of 4: Select Provider
+	inputBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#BD93F9")).
+		Padding(0, 1)
 
-%s
-Use ↑/↓ to select, Enter to confirm.
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FF5555"))
 
-`, options)
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#44475A"))
 
-	case 1:
-		progressBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Render("▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
-		body = fmt.Sprintf(`
-Step 2 of 4: Enter API Key
+	var b strings.Builder
 
-Get your key from: https://minimax.ai
+	b.WriteString("\n")
+	b.WriteString(titleStyle.Render("connect to minimax"))
+	b.WriteString("\n\n")
 
-%s
+	b.WriteString(subtitleStyle.Render("enter your api key from minimax.ai"))
+	b.WriteString("\n\n")
 
-API Key: %s
+	// Input box
+	b.WriteString(inputBoxStyle.Render(s.input.View()))
+	b.WriteString("\n\n")
 
-Use ↑ to go back, Enter to continue, Ctrl+C to cancel.
-`, s.statusMsg, s.input.View())
-		s.statusMsg = ""
-
-	case 2:
-		progressBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Render("▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
-		body = fmt.Sprintf(`
-Step 3 of 4: Select Model
-
-  ● minimax-m2.1 (recommended)
-
-Selected: %s
-
-Use ↑ to go back, Enter to save, Ctrl+C to cancel.
-`, s.model)
-
-	case 3:
-		progressBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Render("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓")
-		body = fmt.Sprintf(`
-Step 4 of 4: Confirm Configuration
-
-  ✓ Provider:   %s
-  ✓ Model:      %s
-  ✓ API Key:    %s...%s
-
-Configuration saved to:
-%s
-
-Use ↑ to go back, Enter to confirm, Ctrl+C to cancel.
-`, s.provider, s.model, s.apiKey[:4], s.apiKey[len(s.apiKey)-4:], app.GetBinaryConfigPath())
+	// Error message
+	if s.statusMsg != "" {
+		b.WriteString(errorStyle.Render(s.statusMsg))
+		b.WriteString("\n\n")
 	}
 
-	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
-		Render("\n↑/↓ Navigate  |  Enter Confirm  |  Ctrl+C Cancel")
+	b.WriteString(hintStyle.Render("enter to save • esc to cancel"))
 
-	content := header + "\n\n" + progressBar + "\n\n" + body + help
-
-	paddingTop := maxInt(0, (s.height-20)/2)
-	paddingSides := maxInt(0, (s.width-lipgloss.Width(content)-4)/2)
-
-	result := strings.Repeat("\n", paddingTop)
-	if paddingSides > 0 {
-		result += strings.Repeat(" ", paddingSides)
-	}
-	result += content
-
-	return lipgloss.NewStyle().
-		Width(s.width).
-		Height(s.height).
-		Render(result)
+	return b.String()
 }
 
 func (s *SetupWizard) Done() bool {
 	return s.done
 }
 
-// maxInt returns the larger of two integers (Go 1.18 compatibility)
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+func (s *SetupWizard) Saved() bool {
+	return s.saved
+}
+
+func (s *SetupWizard) GetConfig() app.Config {
+	return *s.cfg
 }

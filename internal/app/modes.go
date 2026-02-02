@@ -2,16 +2,17 @@ package app
 
 import "strings"
 
+// Mode represents the operating mode of the agent.
 type Mode string
 
 const (
-	ModeAsk        Mode = "ask"
-	ModeArchitect  Mode = "architect"
-	ModePlan       Mode = "plan"
-	ModeDo         Mode = "do"
-	ModeCode       Mode = "code"
-	ModeDebug      Mode = "debug"
-	ModeOrchestrate Mode = "orchestrate"
+	ModeAsk         Mode = "ask"         // Ask mode for answering questions
+	ModeArchitect   Mode = "architect"   // Architect mode for high-level design
+	ModePlan        Mode = "plan"        // Plan mode for analyzing projects
+	ModeDo          Mode = "do"          // Do mode for executing tasks
+	ModeCode        Mode = "code"        // Code mode for making changes
+	ModeDebug       Mode = "debug"       // Debug mode for troubleshooting
+	ModeOrchestrate Mode = "orchestrate" // Orchestrate mode for coordinating multiple agents
 )
 
 func ParseMode(value string) (Mode, bool) {
