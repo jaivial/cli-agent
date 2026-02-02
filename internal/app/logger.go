@@ -29,6 +29,14 @@ func (l *Logger) Error(message string, fields map[string]interface{}) {
 	l.write("error", message, fields)
 }
 
+func (l *Logger) Debug(message string, fields map[string]interface{}) {
+	l.write("debug", message, fields)
+}
+
+func (l *Logger) Warn(message string, fields map[string]interface{}) {
+	l.write("warn", message, fields)
+}
+
 func (l *Logger) write(level, message string, fields map[string]interface{}) {
 	evt := LogEvent{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),

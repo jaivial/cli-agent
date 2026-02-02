@@ -13,6 +13,155 @@ import (
 	"github.com/google/uuid"
 )
 
+// Retry configuration for transient failures
+var retryableErrors = []string{
+	"resource temporarily unavailable",
+	"connection reset by peer",
+	"connection refused",
+	"temporary failure",
+	"text file busy",
+	"no such process",
+}
+
+// isRetryable checks if an error is transient and can be retried
+func isRetryable(err string) bool {
+	errLower := strings.ToLower(err)
+	for _, pattern := range retryableErrors {
+		if strings.Contains(errLower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isResponseTruncated checks if an API response appears to be truncated
+func isResponseTruncated(response string) bool {
+	response = strings.TrimSpace(response)
+	if len(response) == 0 {
+		return false
+	}
+
+	// Check for unclosed braces/brackets
+	openBraces := strings.Count(response, "{") - strings.Count(response, "}")
+	openBrackets := strings.Count(response, "[") - strings.Count(response, "]")
+	if openBraces > 0 || openBrackets > 0 {
+		return true
+	}
+
+	// Check for ends with backslash (line continuation)
+	if strings.HasSuffix(response, "\\") {
+		return true
+	}
+
+	// Check for incomplete patterns
+	incompletePatterns := []string{
+		`"tool":`,
+		`"args":`,
+		`"command":`,
+		`"path":`,
+		`":`,
+		`",`,
+	}
+	for _, pattern := range incompletePatterns {
+		if strings.HasSuffix(response, pattern) {
+			return true
+		}
+	}
+
+	// Check for common truncation lengths (API limits)
+	commonTruncationLengths := []int{4096, 8192, 16384, 32768}
+	responseLen := len(response)
+	for _, limit := range commonTruncationLengths {
+		if responseLen >= limit-10 && responseLen <= limit {
+			// Response is suspiciously close to a common limit
+			if strings.Contains(response, `"tool"`) {
+				return true
+			}
+		}
+	}
+
+	// Check for incomplete JSON key (ends with a quote)
+	lastQuote := strings.LastIndex(response, `"`)
+	if lastQuote > 0 && lastQuote == len(response)-1 {
+		// Ends with a quote - might be truncated key or value
+		return strings.Contains(response, `"tool"`)
+	}
+
+	return false
+}
+
+// isExplicitCompletion checks if the response indicates explicit task completion
+func isExplicitCompletion(response string) bool {
+	responseLower := strings.ToLower(response)
+
+	completionPhrases := []string{
+		"task complete",
+		"task is complete",
+		"task completed",
+		"task has been completed",
+		"i have completed",
+		"successfully completed",
+		"done with the task",
+		"finished the task",
+		"task is done",
+		"task is finished",
+		"all done",
+		"task accomplished",
+	}
+
+	for _, phrase := range completionPhrases {
+		if strings.Contains(responseLower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractExpectedOutputFiles looks for file paths mentioned in the instruction
+func extractExpectedOutputFiles(instruction string) []string {
+	var paths []string
+
+	// Look for common output file patterns
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?:output|create|write|save|generate).*?(/[a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)`),
+		regexp.MustCompile(`(?:file|path).*?['"](/[^'"]+)['"]`),
+		regexp.MustCompile(`(/app/[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+)`),
+		regexp.MustCompile(`output.*?to\s+(/[^\s]+)`),
+	}
+
+	for _, re := range patterns {
+		matches := re.FindAllStringSubmatch(instruction, -1)
+		for _, match := range matches {
+			if len(match) > 1 && match[1] != "" {
+				paths = append(paths, match[1])
+			}
+		}
+	}
+
+	return paths
+}
+
+// verifyFilesExist checks if the expected output files exist
+func verifyFilesExist(paths []string) ([]string, []string) {
+	var existing, missing []string
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			existing = append(existing, path)
+		} else {
+			missing = append(missing, path)
+		}
+	}
+	return existing, missing
+}
+
+// Package-level config instance (can be overridden via environment)
+var agentCfg = AgentConfigFromEnv()
+
+// SetAgentConfig allows overriding the default configuration
+func SetAgentConfig(cfg AgentConfig) {
+	agentCfg = cfg
+}
+
 type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -241,6 +390,13 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 	}
 	state.Messages = append(state.Messages, userMsg)
 
+	// Extract expected output files from task for verification
+	expectedFiles := extractExpectedOutputFiles(task)
+
+	// Track consecutive no-action responses
+	consecutiveNoAction := 0
+	maxNoActionAttempts := 3
+
 	for state.Iteration < l.MaxLoops {
 		l.saveState(state)
 
@@ -265,11 +421,94 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 
 		toolCalls := l.parseToolCalls(response)
 
-		if len(toolCalls) == 0 {
-			state.Completed = true
-			state.FinalOutput = response
-			break
+		// Check for truncation if no tool calls found
+		if len(toolCalls) == 0 && isResponseTruncated(response) {
+			l.Logger.Warn("Response appears truncated", map[string]interface{}{
+				"response_length": len(response),
+			})
+
+			// If we see a partial tool call, prompt for continuation
+			if strings.Contains(response, `"tool"`) || strings.Contains(response, `"write_file"`) || strings.Contains(response, `"exec"`) {
+				promptMsg := AgentMessage{
+					Role:      "user",
+					Content:   "Your response was truncated. Please provide ONLY the tool call JSON without explanation. Keep file content SHORT. Format: {\"tool\": \"write_file\", \"args\": {\"path\": \"/app/file.py\", \"content\": \"short content\"}}",
+					Timestamp: time.Now(),
+				}
+				state.Messages = append(state.Messages, promptMsg)
+				state.Iteration++
+				continue
+			}
 		}
+
+		if len(toolCalls) == 0 {
+			consecutiveNoAction++
+
+			// Check if model explicitly says task is complete
+			explicitlyComplete := isExplicitCompletion(response)
+
+			// Check if we've done any meaningful work
+			hasExecutedTools := len(state.Results) > 0
+
+			// If explicit completion and we've done work, verify and finish
+			if explicitlyComplete && hasExecutedTools {
+				// Verify expected files exist before completing
+				if len(expectedFiles) > 0 {
+					existing, missing := verifyFilesExist(expectedFiles)
+					if len(missing) > 0 {
+						l.Logger.Warn("Task claims complete but expected files missing", map[string]interface{}{
+							"missing":  missing,
+							"existing": existing,
+						})
+						// Prompt the model to create missing files
+						promptMsg := AgentMessage{
+							Role:      "user",
+							Content:   fmt.Sprintf("WARNING: The following expected output files are missing: %v\nPlease create these files to complete the task. Use the write_file tool with the correct path and content.", missing),
+							Timestamp: time.Now(),
+						}
+						state.Messages = append(state.Messages, promptMsg)
+						state.Iteration++
+						continue
+					}
+				}
+				state.Completed = true
+				state.FinalOutput = response
+				break
+			}
+
+			// If too many no-action attempts, give up
+			if consecutiveNoAction >= maxNoActionAttempts {
+				l.Logger.Warn("Too many consecutive no-action responses", map[string]interface{}{
+					"attempts": consecutiveNoAction,
+				})
+				state.Completed = true
+				state.FinalOutput = response
+				break
+			}
+
+			// Prompt the model to take action with emphasis on brevity
+			actionPrompt := "You haven't taken any action yet. Please use one of the available tools to complete the task.\n" +
+				"IMPORTANT: Respond with ONLY the JSON tool call. No explanation, no prose.\n" +
+				"Format: {\"tool\": \"tool_name\", \"args\": {...}}\n" +
+				"Available tools: exec, write_file, read_file, list_dir, grep, edit_file\n"
+
+			if !hasExecutedTools {
+				actionPrompt += "For write_file: Keep content SHORT. Write skeleton code first, then add details incrementally."
+			} else {
+				actionPrompt += "If the task is truly complete, respond with 'Task completed successfully'."
+			}
+
+			promptMsg := AgentMessage{
+				Role:      "user",
+				Content:   actionPrompt,
+				Timestamp: time.Now(),
+			}
+			state.Messages = append(state.Messages, promptMsg)
+			state.Iteration++
+			continue
+		}
+
+		// Reset counter when we get valid tool calls
+		consecutiveNoAction = 0
 
 		for _, call := range toolCalls {
 			result := l.executeTool(ctx, call)
@@ -306,7 +545,7 @@ func (l *AgentLoop) buildPrompt(messages []AgentMessage) string {
 }
 
 func (l *AgentLoop) buildSystemMessage() string {
-	return l.buildSystemMessageEnhanced()
+	return GetEnhancedSystemPrompt()
 }
 
 // GetTaskCategory returns the category for task-specific prompts
@@ -346,6 +585,142 @@ func GetTaskCategory(task string) string {
 
 func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 	var toolCalls []ToolCall
+
+	// === Format -1: Extract JSON from markdown code blocks ===
+	// Look for ```json ... ``` blocks first
+	jsonBlockRe := regexp.MustCompile("```json\\s*\\n([\\s\\S]*?)\\n```")
+	if matches := jsonBlockRe.FindAllStringSubmatch(response, -1); len(matches) > 0 {
+		for _, match := range matches {
+			if len(match) > 1 {
+				content := strings.TrimSpace(match[1])
+				// Try to parse as tool call
+				var toolResp struct {
+					Tool string                 `json:"tool"`
+					Args map[string]interface{} `json:"args"`
+				}
+				if err := json.Unmarshal([]byte(content), &toolResp); err == nil && toolResp.Tool != "" {
+					arguments, _ := json.Marshal(toolResp.Args)
+					toolCalls = append(toolCalls, ToolCall{
+						ID:        fmt.Sprintf("%s_1", toolResp.Tool),
+						Name:      toolResp.Tool,
+						Arguments: arguments,
+					})
+					return toolCalls
+				}
+				// Try flat format {"tool": "exec", "command": "..."} or {"tool": "...", "args": {...}}
+				var rawResp map[string]interface{}
+				if err := json.Unmarshal([]byte(content), &rawResp); err == nil {
+					if toolName, ok := rawResp["tool"].(string); ok && toolName != "" {
+						var arguments []byte
+
+						// Check if there's already an "args" key
+						if argsVal, hasArgs := rawResp["args"]; hasArgs {
+							if argsMap, isMap := argsVal.(map[string]interface{}); isMap {
+								arguments, _ = json.Marshal(argsMap)
+							} else {
+								arguments, _ = json.Marshal(argsVal)
+							}
+						} else {
+							// No "args" key - collect all non-tool keys
+							args := make(map[string]interface{})
+							for key, val := range rawResp {
+								if key != "tool" {
+									args[key] = val
+								}
+							}
+							arguments, _ = json.Marshal(args)
+						}
+
+						toolCalls = append(toolCalls, ToolCall{
+							ID:        fmt.Sprintf("%s_1", toolName),
+							Name:      toolName,
+							Arguments: arguments,
+						})
+						return toolCalls
+					}
+				}
+			}
+		}
+	}
+
+	// === Format -0.5: Extract code from markdown and convert to write_file ===
+	// Look for ```python, ```c, ```go etc. with path hints
+	codeBlockRe := regexp.MustCompile("```(python|c|go|bash|sh|javascript|js|rust|cpp|java)\\s*\\n([\\s\\S]*?)\\n```")
+	pathHintRe := regexp.MustCompile(`(?:create|write|save|output).*?['"](/[^'"]+)['"]|(?:file|path).*?['"](/[^'"]+)['"]|(/app/[a-zA-Z0-9_.-]+\.[a-z]+)`)
+
+	// Map code block languages to file extensions
+	langToExt := map[string][]string{
+		"python":     {".py"},
+		"c":          {".c", ".h"},
+		"go":         {".go"},
+		"bash":       {".sh", ".bash"},
+		"sh":         {".sh", ".bash"},
+		"javascript": {".js"},
+		"js":         {".js"},
+		"rust":       {".rs"},
+		"cpp":        {".cpp", ".cc", ".h", ".hpp"},
+		"java":       {".java"},
+	}
+
+	if matches := codeBlockRe.FindAllStringSubmatch(response, -1); len(matches) > 0 {
+		// Look for path hints in the text before the code block
+		pathMatches := pathHintRe.FindAllStringSubmatch(response, -1)
+		if len(pathMatches) > 0 && len(matches) > 0 {
+			// Get the first non-empty path
+			var path string
+			for _, pm := range pathMatches {
+				for i := 1; i < len(pm); i++ {
+					if pm[i] != "" {
+						path = pm[i]
+						break
+					}
+				}
+				if path != "" {
+					break
+				}
+			}
+			if path != "" {
+				// Find a code block that matches the file extension
+				var code string
+				var lang string
+				pathExt := strings.ToLower(path[strings.LastIndex(path, "."):])
+
+				for _, match := range matches {
+					blockLang := strings.ToLower(match[1])
+					if exts, ok := langToExt[blockLang]; ok {
+						for _, ext := range exts {
+							if ext == pathExt {
+								code = match[2]
+								lang = blockLang
+								break
+							}
+						}
+					}
+					if code != "" {
+						break
+					}
+				}
+
+				// If no matching language found, skip this extraction
+				if code != "" {
+					arguments, _ := json.Marshal(map[string]interface{}{
+						"path":    path,
+						"content": code,
+					})
+					toolCalls = append(toolCalls, ToolCall{
+						ID:        "write_file_1",
+						Name:      "write_file",
+						Arguments: arguments,
+					})
+					l.Logger.Info("Extracted code block as write_file", map[string]interface{}{
+						"path": path,
+						"lang": lang,
+					})
+					return toolCalls
+				}
+			}
+		}
+	}
 
 	// === Format 0: Perl hash syntax {tool => "...", args => { --key "value" }} ===
 	if strings.Contains(response, "{tool") && strings.Contains(response, "=>") {
@@ -405,17 +780,30 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 					return toolCalls
 				}
 
-				// Try direct args: {"tool": "...", "command": "...", ...}
+				// Try direct args: {"tool": "...", "command": "...", ...} or {"tool": "...", "args": {...}}
 				var rawResp map[string]interface{}
 				if err := json.Unmarshal([]byte(content), &rawResp); err == nil {
 					if toolName, ok := rawResp["tool"].(string); ok && toolName != "" {
-						args := make(map[string]interface{})
-						for key, val := range rawResp {
-							if key != "tool" {
-								args[key] = val
+						var arguments []byte
+
+						// Check if there's already an "args" key
+						if argsVal, hasArgs := rawResp["args"]; hasArgs {
+							if argsMap, isMap := argsVal.(map[string]interface{}); isMap {
+								arguments, _ = json.Marshal(argsMap)
+							} else {
+								arguments, _ = json.Marshal(argsVal)
 							}
+						} else {
+							// No "args" key - collect all non-tool keys
+							args := make(map[string]interface{})
+							for key, val := range rawResp {
+								if key != "tool" {
+									args[key] = val
+								}
+							}
+							arguments, _ = json.Marshal(args)
 						}
-						arguments, _ := json.Marshal(args)
+
 						toolCalls = append(toolCalls, ToolCall{
 							ID:        fmt.Sprintf("%s_1", toolName),
 							Name:      toolName,
@@ -540,13 +928,28 @@ func (l *AgentLoop) parseToolCalls(response string) []ToolCall {
 							var rawResp map[string]interface{}
 							if err := json.Unmarshal([]byte(jsonStr), &rawResp); err == nil {
 								if toolName, ok := rawResp["tool"].(string); ok && toolName != "" {
-									args := make(map[string]interface{})
-									for key, val := range rawResp {
-										if key != "tool" {
-											args[key] = val
+									var arguments []byte
+
+									// Check if there's already an "args" key with a map value
+									if argsVal, hasArgs := rawResp["args"]; hasArgs {
+										if argsMap, isMap := argsVal.(map[string]interface{}); isMap {
+											// Use the existing args map directly
+											arguments, _ = json.Marshal(argsMap)
+										} else {
+											// args exists but isn't a map, marshal as-is
+											arguments, _ = json.Marshal(argsVal)
 										}
+									} else {
+										// No "args" key - collect all non-tool keys
+										args := make(map[string]interface{})
+										for key, val := range rawResp {
+											if key != "tool" {
+												args[key] = val
+											}
+										}
+										arguments, _ = json.Marshal(args)
 									}
-									arguments, _ := json.Marshal(args)
+
 									toolCalls = append(toolCalls, ToolCall{
 										ID:        fmt.Sprintf("%s_1", toolName),
 										Name:      toolName,
@@ -633,6 +1036,15 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		Success:    false,
 	}
 
+	// Check context cancellation before executing
+	select {
+	case <-ctx.Done():
+		result.Error = "Operation cancelled"
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	default:
+	}
+
 	switch call.Name {
 	case "exec":
 		var args struct {
@@ -671,6 +1083,12 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			return result
 		}
 
+		if args.Path == "" {
+			result.Error = "Path cannot be empty"
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
 		data, err := os.ReadFile(args.Path)
 		if err != nil {
 			result.Error = err.Error()
@@ -690,10 +1108,23 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			return result
 		}
 
-		dir := args.Path[:strings.LastIndex(args.Path, "/")]
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			result.Error = fmt.Sprintf("Failed to create directory: %v", err)
-		} else if err := os.WriteFile(args.Path, []byte(args.Content), 0644); err != nil {
+		if args.Path == "" {
+			result.Error = "Path cannot be empty"
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
+		// Create parent directory if path contains a slash
+		if slashIdx := strings.LastIndex(args.Path, "/"); slashIdx > 0 {
+			dir := args.Path[:slashIdx]
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				result.Error = fmt.Sprintf("Failed to create directory: %v", err)
+				result.DurationMs = time.Since(start).Milliseconds()
+				return result
+			}
+		}
+
+		if err := os.WriteFile(args.Path, []byte(args.Content), 0644); err != nil {
 			result.Error = err.Error()
 		} else {
 			result.Output = fmt.Sprintf("File written: %s", args.Path)
@@ -731,6 +1162,15 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		}
 
 	case "grep":
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			result.Error = "Operation cancelled"
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		default:
+		}
+
 		var args struct {
 			Pattern   string `json:"pattern"`
 			Path      string `json:"path"`
@@ -761,6 +1201,15 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		}
 
 	case "search_files":
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			result.Error = "Operation cancelled"
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		default:
+		}
+
 		var args struct {
 			Pattern string `json:"pattern"`
 			Path    string `json:"path"`
@@ -819,5 +1268,15 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 	}
 
 	result.DurationMs = time.Since(start).Milliseconds()
+
+	// Consistent logging for tool failures
+	if !result.Success && l.Logger != nil {
+		l.Logger.Error("Tool execution failed", map[string]interface{}{
+			"tool":     call.Name,
+			"error":    result.Error,
+			"duration": result.DurationMs,
+		})
+	}
+
 	return result
 }
