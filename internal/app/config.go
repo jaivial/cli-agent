@@ -23,7 +23,7 @@ func DefaultConfig() Config {
 	return Config{
 		BaseURL:           "https://api.minimax.io/anthropic/v1/messages",
 		Model:             "minimax-m2.1",
-		MaxTokens:         2048,
+		MaxTokens:         4096,
 		MaxParallelAgents: 50,
 		DefaultMode:       "plan",
 		SafeMode:          true,
@@ -33,7 +33,7 @@ func DefaultConfig() Config {
 
 func LoadConfig(path string) (Config, error) {
 	cfg := DefaultConfig()
-	
+
 	// Try binary directory first
 	if execPath, err := os.Executable(); err == nil {
 		binaryDir := filepath.Dir(execPath)
@@ -45,7 +45,7 @@ func LoadConfig(path string) (Config, error) {
 			}
 		}
 	}
-	
+
 	// Fall back to provided path
 	if path == "" {
 		return cfg, nil
@@ -92,7 +92,7 @@ func SaveConfig(cfg Config, path string) error {
 			return nil
 		}
 	}
-	
+
 	// Fall back to provided path
 	if path == "" {
 		return errors.New("no path provided for config")

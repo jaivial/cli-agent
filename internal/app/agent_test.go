@@ -223,9 +223,9 @@ func TestExecuteTool_Exec(t *testing.T) {
 			expectOutputContains: "hello world test",
 		},
 		{
-			name:                "Failing command - invalid command",
-			command:             "nonexistent_command_xyz",
-			expectSuccess:       false,
+			name:          "Failing command - invalid command",
+			command:       "nonexistent_command_xyz",
+			expectSuccess: false,
 		},
 		{
 			name:          "Command with exit code 1",
@@ -751,5 +751,95 @@ func TestExecuteToolContextCancellation(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "cancelled") {
 		t.Errorf("Expected cancellation error, got: %s", result.Error)
+	}
+}
+
+func TestParseToolCalls_ToolCallsEnvelope(t *testing.T) {
+	l := createTestAgentLoop()
+
+	resp := `I'll run a command.
+
+{
+  "tool_calls": [
+    {
+      "id": "exec_1",
+      "name": "exec",
+      "arguments": {"command": "echo hello"}
+    }
+  ]
+}`
+
+	calls := l.parseToolCalls(resp)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "exec" {
+		t.Fatalf("expected tool name exec, got %q", calls[0].Name)
+	}
+	if !strings.Contains(string(calls[0].Arguments), "echo hello") {
+		t.Fatalf("expected arguments to include command, got %s", string(calls[0].Arguments))
+	}
+}
+
+func TestExecuteTool_PatchFile(t *testing.T) {
+	l := createTestAgentLoop()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "a.txt")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0644); err != nil {
+		t.Fatalf("failed to setup file: %v", err)
+	}
+
+	patch := "@@ -1,2 +1,2 @@\n-line1\n+LINE1\n line2\n"
+	call := ToolCall{
+		ID:   "patch_1",
+		Name: "patch_file",
+		Arguments: mustMarshalJSON(map[string]interface{}{
+			"path":  path,
+			"patch": patch,
+		}),
+	}
+
+	result := l.executeTool(createTestContext(), call)
+	if !result.Success {
+		t.Fatalf("expected patch_file success, got error: %s", result.Error)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read patched file: %v", err)
+	}
+	if string(data) != "LINE1\nline2\n" {
+		t.Fatalf("unexpected patched content: %q", string(data))
+	}
+}
+
+func TestExecuteTool_AppendFile(t *testing.T) {
+	l := createTestAgentLoop()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "append.txt")
+	if err := os.WriteFile(path, []byte("a\n"), 0644); err != nil {
+		t.Fatalf("failed to setup file: %v", err)
+	}
+
+	call := ToolCall{
+		ID:   "append_1",
+		Name: "append_file",
+		Arguments: mustMarshalJSON(map[string]interface{}{
+			"path":    path,
+			"content": "b\n",
+		}),
+	}
+
+	result := l.executeTool(createTestContext(), call)
+	if !result.Success {
+		t.Fatalf("expected append_file success, got error: %s", result.Error)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read appended file: %v", err)
+	}
+	if string(data) != "a\nb\n" {
+		t.Fatalf("unexpected appended content: %q", string(data))
 	}
 }

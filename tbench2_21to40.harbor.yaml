@@ -1,0 +1,43 @@
+job_name: tbench2-21to40
+
+agents:
+  - import_path: eai_agent.agent:EaiAgent
+    kwargs:
+      max_loops: 60
+      base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+      model: glm-4.7
+      max_tokens: 4096
+
+datasets:
+  - registry:
+      url: https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json
+    name: terminal-bench
+    version: "2.0"
+    # Select tasks 21-40 in the official "first-N" ordering by excluding the
+    # known first 20 tasks and taking the next 20.
+    exclude_task_names:
+      - llm-inference-batching-scheduler
+      - write-compressor
+      - winning-avg-corewars
+      - pytorch-model-cli
+      - gpt2-codegolf
+      - merge-diff-arc-agi-task
+      - break-filter-js-from-html
+      - reshard-c4-data
+      - log-summary-date-ranges
+      - largest-eigenval
+      - password-recovery
+      - portfolio-optimization
+      - path-tracing-reverse
+      - regex-chess
+      - modernize-scientific-stack
+      - torch-tensor-parallelism
+      - path-tracing
+      - prove-plus-comm
+      - feal-linear-cryptanalysis
+      - caffe-cifar-10
+    n_tasks: 20
+
+environment:
+  type: docker
+  delete: false

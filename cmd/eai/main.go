@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -98,11 +99,20 @@ func main() {
 			if err != nil {
 				return err
 			}
-			if cfg.MinimaxAPIKey == "" {
-				cfg.MinimaxAPIKey = os.Getenv("MINIMAX_API_KEY")
+			// Env overrides (take precedence over config defaults).
+			if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
+				cfg.MinimaxAPIKey = v
 			}
-			if cfg.BaseURL == "" {
-				cfg.BaseURL = os.Getenv("MINIMAX_BASE_URL")
+			if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
+				cfg.BaseURL = v
+			}
+			if v := os.Getenv("MINIMAX_MODEL"); v != "" {
+				cfg.Model = v
+			}
+			if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					cfg.MaxTokens = n
+				}
 			}
 
 			mockMode := cfg.MinimaxAPIKey == ""
@@ -156,11 +166,20 @@ func main() {
 				cfg.MinimaxAPIKey = "mock"
 				cfg.Model = "mock"
 			} else {
-				if cfg.MinimaxAPIKey == "" {
-					cfg.MinimaxAPIKey = os.Getenv("MINIMAX_API_KEY")
+				// Env overrides (take precedence over config defaults).
+				if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
+					cfg.MinimaxAPIKey = v
 				}
-				if cfg.BaseURL == "" {
-					cfg.BaseURL = os.Getenv("MINIMAX_BASE_URL")
+				if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
+					cfg.BaseURL = v
+				}
+				if v := os.Getenv("MINIMAX_MODEL"); v != "" {
+					cfg.Model = v
+				}
+				if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						cfg.MaxTokens = n
+					}
 				}
 				if cfg.MinimaxAPIKey == "" {
 					return fmt.Errorf("MINIMAX_API_KEY not set. Please set it in config or environment")
@@ -226,7 +245,7 @@ func main() {
 		},
 	}
 
-	agentCmd.Flags().IntVarP(&agentMaxLoops, "max-loops", "l", 10, "Maximum number of agent iterations")
+	agentCmd.Flags().IntVarP(&agentMaxLoops, "max-loops", "l", 30, "Maximum number of agent iterations")
 	agentCmd.Flags().StringVarP(&agentTask, "task", "t", "", "Task to execute (non-interactive)")
 	agentCmd.Flags().BoolVarP(&agentMock, "mock", "m", false, "Use mock MiniMax client for testing")
 

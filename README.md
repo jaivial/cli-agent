@@ -138,6 +138,16 @@ bash test-agent.sh
 python3 terminal_bench_harness.py ./bin/eai
 ```
 
+### Terminal-Bench 2.0 (Harbor, oficial)
+
+Requiere `harbor` y una API key real en `MINIMAX_API_KEY`.
+
+```bash
+export MINIMAX_API_KEY="tu-api-key-aqui"
+go build -o eai ./cmd/eai
+harbor jobs start -c tbench2_first5.harbor.yaml
+```
+
 ## 📊 Terminal-Bench 2.0 Results
 
 ```

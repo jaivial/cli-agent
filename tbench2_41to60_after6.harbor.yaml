@@ -1,0 +1,73 @@
+job_name: tbench2-41to60-after6
+
+agents:
+  - import_path: eai_agent.agent:EaiAgent
+    kwargs:
+      max_loops: 60
+      base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+      model: glm-4.7
+      max_tokens: 4096
+
+datasets:
+  - registry:
+      url: https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json
+    name: terminal-bench
+    version: "2.0"
+    # Select tasks 47-60 in the official ordering by excluding the known first
+    # 46 tasks and taking the next 14.
+    exclude_task_names:
+      # 1-20
+      - llm-inference-batching-scheduler
+      - write-compressor
+      - winning-avg-corewars
+      - pytorch-model-cli
+      - gpt2-codegolf
+      - merge-diff-arc-agi-task
+      - break-filter-js-from-html
+      - reshard-c4-data
+      - log-summary-date-ranges
+      - largest-eigenval
+      - password-recovery
+      - portfolio-optimization
+      - path-tracing-reverse
+      - regex-chess
+      - modernize-scientific-stack
+      - torch-tensor-parallelism
+      - path-tracing
+      - prove-plus-comm
+      - feal-linear-cryptanalysis
+      - caffe-cifar-10
+      # 21-40
+      - adaptive-rejection-sampler
+      - build-pov-ray
+      - chess-best-move
+      - cobol-modernization
+      - compile-compcert
+      - configure-git-webserver
+      - crack-7z-hash
+      - custom-memory-heap-crash
+      - db-wal-recovery
+      - distribution-search
+      - fix-git
+      - headless-terminal
+      - hf-model-inference
+      - mteb-retrieve
+      - multi-source-data-merger
+      - overfull-hbox
+      - polyglot-rust-c
+      - pypi-server
+      - qemu-startup
+      - schemelike-metacircular-eval
+      # 41-46 (first 6 of 41-60 slice)
+      - git-multibranch
+      - train-fasttext
+      - video-processing
+      - qemu-alpine-ssh
+      - kv-store-grpc
+      - install-windows-3.11
+    n_tasks: 14
+
+environment:
+  type: docker
+  delete: false
+

@@ -17,6 +17,7 @@ type AgentConfig struct {
 	ProcessCleanupDelay       time.Duration
 	ConvergenceCheckInterval  int
 	MaxOutputBufferSize       int
+	MaxPromptBytes            int
 	MaxRetries                int
 	RetryDelay                time.Duration
 }
@@ -27,12 +28,13 @@ func DefaultAgentConfig() AgentConfig {
 		DefaultTimeout:            30 * time.Second,
 		VMTimeout:                 300 * time.Second,
 		MaxHTTPResponseSize:       1024 * 1024, // 1MB
-		ContextSummarizeThreshold: 20000,       // ~5000 tokens
+		ContextSummarizeThreshold: 60000,       // chars, soft target for prompt trimming
 		MaxStallCount:             6,
 		ToolCacheExpiry:           5 * time.Minute,
 		ProcessCleanupDelay:       5 * time.Minute,
 		ConvergenceCheckInterval:  3,
-		MaxOutputBufferSize:       1024 * 1024, // 1MB
+		MaxOutputBufferSize:       256 * 1024, // 256KB; keep prompts responsive
+		MaxPromptBytes:            120 * 1024, // 120KB total prompt budget
 		MaxRetries:                3,
 		RetryDelay:                500 * time.Millisecond,
 	}
@@ -93,6 +95,12 @@ func AgentConfigFromEnv() AgentConfig {
 	if v := os.Getenv("EAI_MAX_OUTPUT_BUFFER_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxOutputBufferSize = n
+		}
+	}
+
+	if v := os.Getenv("EAI_MAX_PROMPT_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxPromptBytes = n
 		}
 	}
 

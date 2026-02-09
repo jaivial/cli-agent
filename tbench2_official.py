@@ -10,7 +10,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-API_KEY = "sk-cp-LOdx3q4oeKupQ7XIIYTjuoxBNDnzIBCMFy0UBMEFzT5_E1bC5-oUJiJFli0Kf4hTZuLfZzmuh8CscOSooK8wE1b3tp6uiVUsaehrWjQZ1eD6YPmxXtLhGBU"
+API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+if not API_KEY:
+    raise SystemExit("MINIMAX_API_KEY is not set")
 TASKS_DIR = "/root/clawd/terminal-bench-2.0"
 
 def get_task_instruction(task_name):

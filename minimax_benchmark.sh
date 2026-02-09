@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-export MINIMAX_API_KEY="sk-cp-LOdx3q4oeKupQ7XIIYTjuoxBNDnzIBCMFy0UBMEFzT5_E1bC5-oUJiJFli0Kf4hTZuLfZzmuh8CscOSooK8wE1b3tp6uiVUsaehrWjQZ1eD6YPmxXtLhGBU"
+set -euo pipefail
 
-cd /Users/usuario/Desktop/cli-agent
+: "${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}"
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 tasks=(
     "List all files in the current directory"
@@ -19,7 +21,7 @@ for i in "${!tasks[@]}"; do
     task="${tasks[$i]}"
     echo "[$((i+1))/$total] ${task:0:50}..."
     
-    result=$(./bin/eai agent "$task" 2>&1)
+    result=$(./eai agent --max-loops 5 "$task" 2>&1)
     
     if echo "$result" | grep -q "Iterations: 1"; then
         echo "  ✅ Success"

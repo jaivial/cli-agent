@@ -11,8 +11,10 @@ import sys
 import json
 import time
 
-AGENT_PATH = "/Users/usuario/Desktop/cli-agent"
-API_KEY = "sk-cp-LOdx3q4oeKupQ7XIIYTjuoxBNDnzIBCMFy0UBMEFzT5_E1bC5-oUJiJFli0Kf4hTZuLfZzmuh8CscOSooK8wE1b3tp6uiVUsaehrWjQZ1eD6YPmxXtLhGBU"
+AGENT_PATH = os.environ.get("AGENT_PATH", os.path.dirname(os.path.abspath(__file__)))
+API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+if not API_KEY:
+    raise SystemExit("MINIMAX_API_KEY is not set")
 AGENT_GO = f"{AGENT_PATH}/internal/app/agent.go"
 
 def run_parser_test():
