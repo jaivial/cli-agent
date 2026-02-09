@@ -704,7 +704,11 @@ loop:
 			if backoff > 60*time.Second {
 				backoff = 60 * time.Second
 			}
-			time.Sleep(backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				break loop
+			}
 			continue
 		}
 		apiErrorStreak = 0
