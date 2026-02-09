@@ -66,6 +66,9 @@ type keyMap struct {
 	Enter    key.Binding
 	Clear    key.Binding
 	NextMode key.Binding
+	ToggleTrace key.Binding
+	FocusNext   key.Binding
+	Cancel      key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -86,16 +89,29 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "switch mode"),
 		),
+		ToggleTrace: key.NewBinding(
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("ctrl+t", "toggle trace"),
+		),
+		FocusNext: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "focus next"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "cancel run"),
+		),
 	}
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Clear, k.NextMode, k.Quit}
+	return []key.Binding{k.Enter, k.FocusNext, k.ToggleTrace, k.Cancel, k.Clear, k.NextMode, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Enter, k.Clear, k.NextMode, k.Quit},
+		{k.Enter, k.FocusNext, k.ToggleTrace, k.Cancel},
+		{k.Clear, k.NextMode, k.Quit},
 	}
 }
 

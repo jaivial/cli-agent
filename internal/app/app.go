@@ -49,6 +49,12 @@ func (a *Application) ExecuteChat(ctx context.Context, mode Mode, input string) 
 	return a.Client.Complete(ctx, prompt)
 }
 
+func (a *Application) ExecuteAgentStream(ctx context.Context, task string, maxLoops int, emit EventSink) (*AgentState, error) {
+	stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
+	loop := NewAgentLoop(a.Client, maxLoops, stateDir, a.Logger)
+	return loop.ExecuteWithEvents(ctx, task, emit)
+}
+
 func (a *Application) ExecuteOrchestrate(ctx context.Context, mode Mode, input string, agents int) (string, error) {
 	if agents <= 0 {
 		return "", errors.New("agents must be > 0")

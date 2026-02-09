@@ -308,6 +308,12 @@ type ToolResult struct {
 	Output     string `json:"output"`
 	Error      string `json:"error,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
+
+	// Optional file-change metadata (used by the TUI to render diffs).
+	FilePath   string `json:"file_path,omitempty"`
+	ChangeType string `json:"change_type,omitempty"` // write|edit|patch
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
 }
 
 type AgentState struct {
@@ -330,6 +336,44 @@ type AgentMessage struct {
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
 	Timestamp   time.Time    `json:"timestamp"`
 }
+
+type AgentEventKind string
+
+const (
+	AgentEventIterationStart AgentEventKind = "iteration_start"
+	AgentEventModelResponse  AgentEventKind = "model_response"
+	AgentEventToolCall       AgentEventKind = "tool_call"
+	AgentEventToolResult     AgentEventKind = "tool_result"
+	AgentEventFileChange     AgentEventKind = "file_change"
+	AgentEventCompleted      AgentEventKind = "completed"
+	AgentEventCancelled      AgentEventKind = "cancelled"
+	AgentEventError          AgentEventKind = "error"
+)
+
+// AgentEvent is a safe-to-display activity trace event. It must not contain
+// private chain-of-thought; it should only reflect observable actions and
+// concise summaries.
+type AgentEvent struct {
+	Kind      AgentEventKind `json:"kind"`
+	Timestamp time.Time      `json:"timestamp"`
+
+	Iteration int `json:"iteration,omitempty"`
+	MaxLoops  int `json:"max_loops,omitempty"`
+
+	ToolName   string `json:"tool_name,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+
+	Success *bool `json:"success,omitempty"`
+
+	FilePath   string `json:"file_path,omitempty"`
+	ChangeType string `json:"change_type,omitempty"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+}
+
+type EventSink func(ev AgentEvent)
 
 type AgentLoop struct {
 	Client   *MinimaxClient
@@ -544,6 +588,20 @@ func mustMarshal(v interface{}) json.RawMessage {
 }
 
 func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, error) {
+	return l.ExecuteWithEvents(ctx, task, nil)
+}
+
+func (l *AgentLoop) ExecuteWithEvents(ctx context.Context, task string, emit EventSink) (*AgentState, error) {
+	emitEv := func(ev AgentEvent) {
+		if emit == nil {
+			return
+		}
+		if ev.Timestamp.IsZero() {
+			ev.Timestamp = time.Now()
+		}
+		emit(ev)
+	}
+
 	state := &AgentState{
 		TaskID:    uuid.New().String(),
 		Task:      task,
@@ -595,6 +653,13 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 
 loop:
 	for state.Iteration < l.MaxLoops {
+		emitEv(AgentEvent{
+			Kind:      AgentEventIterationStart,
+			Iteration: state.Iteration + 1,
+			MaxLoops:  state.MaxLoops,
+			Summary:   "Iteration start",
+		})
+
 		l.saveState(state)
 
 		response, err := l.Client.Complete(ctx, l.buildPrompt(state.Messages))
@@ -604,6 +669,11 @@ loop:
 			})
 			// Permanent misconfiguration: stop early with a clear error.
 			if isLikelyConfigError(err) || ctx.Err() != nil {
+				emitEv(AgentEvent{
+					Kind:    AgentEventError,
+					Summary: "Model error",
+					Detail:  err.Error(),
+				})
 				state.Messages = append(state.Messages, AgentMessage{
 					Role:      "assistant",
 					Content:   fmt.Sprintf("Error: %v", err),
@@ -615,6 +685,11 @@ loop:
 			// Transient API failures happen; backoff and retry without consuming a loop.
 			apiErrorStreak++
 			if apiErrorStreak > 8 {
+				emitEv(AgentEvent{
+					Kind:    AgentEventError,
+					Summary: "Model error (retries exhausted)",
+					Detail:  err.Error(),
+				})
 				state.Messages = append(state.Messages, AgentMessage{
 					Role:      "assistant",
 					Content:   fmt.Sprintf("Error: %v", err),
@@ -638,6 +713,13 @@ loop:
 			Role:      "assistant",
 			Content:   response,
 			Timestamp: time.Now(),
+		})
+		emitEv(AgentEvent{
+			Kind:      AgentEventModelResponse,
+			Iteration: state.Iteration + 1,
+			MaxLoops:  state.MaxLoops,
+			Summary:   fmt.Sprintf("Model response received (%d chars)", len(response)),
+			Detail:    truncateForTrace(oneLine(response), 4000),
 		})
 
 		toolCalls := l.parseToolCalls(response)
@@ -786,6 +868,16 @@ loop:
 		consecutiveNoAction = 0
 
 		for _, call := range toolCalls {
+			argsPreview := safeToolArgsPreview(call.Arguments)
+			emitEv(AgentEvent{
+				Kind:      AgentEventToolCall,
+				Iteration: state.Iteration + 1,
+				MaxLoops:  state.MaxLoops,
+				ToolName:  call.Name,
+				Summary:   fmt.Sprintf("%s %s", call.Name, argsPreview),
+				Detail:    argsPreview,
+			})
+
 			result := l.executeTool(ctx, call)
 			state.Results = append(state.Results, result)
 
@@ -796,6 +888,32 @@ loop:
 				Timestamp:   time.Now(),
 			}
 			state.Messages = append(state.Messages, resultMsg)
+
+			success := result.Success
+			emitEv(AgentEvent{
+				Kind:       AgentEventToolResult,
+				Iteration:  state.Iteration + 1,
+				MaxLoops:   state.MaxLoops,
+				ToolName:   call.Name,
+				Summary:    fmt.Sprintf("%s (%dms)", map[bool]string{true: "OK", false: "ERR"}[success], result.DurationMs),
+				Detail:     truncateForTrace(result.Output+"\n"+result.Error, 8000),
+				DurationMs: result.DurationMs,
+				Success:    &success,
+			})
+
+			if result.FilePath != "" && (result.OldContent != "" || result.NewContent != "" || result.ChangeType != "") {
+				emitEv(AgentEvent{
+					Kind:       AgentEventFileChange,
+					Iteration:  state.Iteration + 1,
+					MaxLoops:   state.MaxLoops,
+					ToolName:   call.Name,
+					Summary:    fmt.Sprintf("%s %s", result.ChangeType, result.FilePath),
+					FilePath:   result.FilePath,
+					ChangeType: result.ChangeType,
+					OldContent: result.OldContent,
+					NewContent: result.NewContent,
+				})
+			}
 		}
 
 		state.Iteration++
@@ -803,6 +921,20 @@ loop:
 
 	state.EndedAt = time.Now()
 	l.saveState(state)
+
+	if ctx.Err() != nil && !state.Completed {
+		emitEv(AgentEvent{
+			Kind:    AgentEventCancelled,
+			Summary: "Cancelled",
+			Detail:  ctx.Err().Error(),
+		})
+	}
+	if state.Completed {
+		emitEv(AgentEvent{
+			Kind:    AgentEventCompleted,
+			Summary: "Completed",
+		})
+	}
 
 	if !state.Completed && state.FinalOutput == "" {
 		state.FinalOutput = fmt.Sprintf("Task did not complete within %d iterations", l.MaxLoops)
@@ -1526,6 +1658,70 @@ func truncateToolOutput(s string) string {
 	return fmt.Sprintf("[output truncated: %d bytes -> %d bytes]\n%s", len(s), maxBytes, tail)
 }
 
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	return strings.TrimSpace(s)
+}
+
+func truncateForTrace(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "\n[truncated]"
+}
+
+func safeToolArgsPreview(raw json.RawMessage) string {
+	raw = normalizeJSONArgs(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return truncateForTrace(oneLine(string(raw)), 240)
+	}
+
+	redactString := func(s string) string {
+		ls := strings.ToLower(s)
+		if strings.Contains(ls, "api_key") || strings.Contains(ls, "apikey") || strings.Contains(ls, "secret") || strings.Contains(ls, "token") {
+			return "[redacted]"
+		}
+		// Best-effort: avoid echoing long key-like blobs into the UI.
+		if len(s) >= 24 {
+			return "[redacted]"
+		}
+		return s
+	}
+
+	switch vv := v.(type) {
+	case map[string]any:
+		for k, val := range vv {
+			lk := strings.ToLower(k)
+			if lk == "content" {
+				size := len(fmt.Sprint(val))
+				vv[k] = fmt.Sprintf("[content omitted: %d bytes]", size)
+				continue
+			}
+			if strings.Contains(lk, "key") || strings.Contains(lk, "secret") || strings.Contains(lk, "token") {
+				vv[k] = "[redacted]"
+				continue
+			}
+			if s, ok := val.(string); ok {
+				vv[k] = redactString(s)
+			}
+		}
+		if b, err := json.Marshal(vv); err == nil {
+			return truncateForTrace(oneLine(string(b)), 240)
+		}
+	case string:
+		return truncateForTrace(oneLine(redactString(vv)), 240)
+	}
+
+	return truncateForTrace(oneLine(string(raw)), 240)
+}
+
 func isProbablyBinary(data []byte) bool {
 	// Fast heuristic: if it contains NUL bytes, treat as binary.
 	for _, b := range data {
@@ -1686,6 +1882,10 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		}
 
 		path := l.resolvePath(args.Path)
+		oldContent := ""
+		if data, err := os.ReadFile(path); err == nil {
+			oldContent = string(data)
+		}
 
 		// Create parent directory if path contains a slash
 		if slashIdx := strings.LastIndex(path, "/"); slashIdx > 0 {
@@ -1701,6 +1901,10 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.Error = err.Error()
 		} else {
 			result.Output = fmt.Sprintf("File written: %s", path)
+			result.FilePath = path
+			result.ChangeType = "write"
+			result.OldContent = truncateForTrace(oldContent, 64*1024)
+			result.NewContent = truncateForTrace(args.Content, 64*1024)
 			result.Success = true
 		}
 
@@ -1874,6 +2078,10 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 					result.Error = err.Error()
 				} else {
 					result.Output = fmt.Sprintf("File edited: %s", path)
+					result.FilePath = path
+					result.ChangeType = "edit"
+					result.OldContent = truncateForTrace(content, 64*1024)
+					result.NewContent = truncateForTrace(newContent, 64*1024)
 					result.Success = true
 				}
 			}
@@ -1935,6 +2143,10 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
+		before := ""
+		if data, err := os.ReadFile(path); err == nil {
+			before = string(data)
+		}
 		tmp, err := os.CreateTemp("", "eai-patch-*.diff")
 		if err != nil {
 			result.Error = err.Error()
@@ -1957,6 +2169,16 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		}
 		result.Output = truncateToolOutput(string(output))
 		result.Success = err == nil
+		if result.Success {
+			after := ""
+			if data, err := os.ReadFile(path); err == nil {
+				after = string(data)
+			}
+			result.FilePath = path
+			result.ChangeType = "patch"
+			result.OldContent = truncateForTrace(before, 64*1024)
+			result.NewContent = truncateForTrace(after, 64*1024)
+		}
 
 	default:
 		result.Error = fmt.Sprintf("Unknown tool: %s", call.Name)
