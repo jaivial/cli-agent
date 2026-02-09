@@ -21,8 +21,10 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		BaseURL:           "https://api.minimax.io/anthropic/v1/messages",
-		Model:             "minimax-m2.1",
+		// Default to the GLM-4.7 coding endpoint we use for TerminalBench.
+		// Users can override via config or env vars MINIMAX_BASE_URL/MINIMAX_MODEL.
+		BaseURL:           "https://api.z.ai/api/coding/paas/v4/chat/completions",
+		Model:             "glm-4.7",
 		MaxTokens:         4096,
 		MaxParallelAgents: 50,
 		DefaultMode:       "plan",
@@ -61,10 +63,10 @@ func LoadConfig(path string) (Config, error) {
 		return cfg, err
 	}
 	if cfg.Model == "" {
-		cfg.Model = "minimax-m2.1"
+		cfg.Model = "glm-4.7"
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.minimax.io/anthropic/v1/messages"
+		cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 2048

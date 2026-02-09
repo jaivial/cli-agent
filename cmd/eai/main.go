@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -38,7 +39,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("    COMPREPLY=()")
 		fmt.Println("    cur=\"${COMP_WORDS[COMP_CWORD]}\"")
 		fmt.Println("    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
-		fmt.Println("    opts=\"agent completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --no-tui --help\"")
+		fmt.Println("    opts=\"agent install completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --no-tui --help\"")
 		fmt.Println("    if [[ $COMP_CWORD -eq 1 ]]; then")
 		fmt.Println("        COMPREPLY=( $(compgen -W \"${opts}\" -- \"${cur}\" )")
 		fmt.Println("    fi")
@@ -65,7 +66,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("}")
 	case "fish":
 		fmt.Println("# fish completion for eai")
-		fmt.Println("complete -c eai -f -a '(agent completion help version ask architect plan do code debug orchestrate)'")
+		fmt.Println("complete -c eai -f -a '(agent install completion help version ask architect plan do code debug orchestrate)'")
 		fmt.Println("complete -c eai -s h -l help -d 'Show help'")
 		fmt.Println("complete -c eai -s v -l version -d 'Print version'")
 		fmt.Println("complete -c eai -s n -l no-tui -d 'Use simple REPL'")
@@ -115,7 +116,7 @@ func main() {
 				}
 			}
 
-			mockMode := cfg.MinimaxAPIKey == ""
+			mockMode, _ := cmd.Flags().GetBool("mock")
 			application, err := app.NewApplication(cfg, mockMode)
 			if err != nil {
 				return err
@@ -127,18 +128,92 @@ func main() {
 				mode, _ = app.ParseMode(cfg.DefaultMode)
 			}
 
-			p := tea.NewProgram(tui.NewMainModel(application, mode))
-			if _, err := p.Run(); err != nil {
-				return err
+			noTUI, _ := cmd.Flags().GetBool("no-tui")
+			if noTUI {
+				// Very small fallback REPL for environments that can't render a TUI.
+				fmt.Println("eai (no-tui). type your message and press enter. ctrl+d to exit.")
+				in := bufio.NewScanner(os.Stdin)
+				for {
+					fmt.Print("> ")
+					if !in.Scan() {
+						return nil
+					}
+					line := strings.TrimSpace(in.Text())
+					if line == "" {
+						continue
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					out, err := application.ExecuteChat(ctx, mode, line)
+					cancel()
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "error: %v\n", err)
+						continue
+					}
+					fmt.Println(out)
+				}
 			}
-			return nil
+
+			p := tea.NewProgram(tui.NewMainModel(application, mode))
+			_, err = p.Run()
+			return err
 		},
 	}
 
 	root.Flags().String("mode", "plan", "mode: ask|architect|plan|do|code|debug|orchestrate")
 	root.Flags().BoolP("no-tui", "n", false, "Use simple REPL instead of TUI")
+	root.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.Flags().BoolP("version", "v", false, "Print version information")
 	root.Flags().String("completion", "", "Generate shell completion (bash|zsh|fish)")
+
+	installCmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install eai onto your PATH (default: ~/.local/bin/eai)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			src, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			dest, _ := cmd.Flags().GetString("dest")
+			if dest == "" {
+				home, _ := os.UserHomeDir()
+				dest = filepath.Join(home, ".local", "bin", "eai")
+			}
+			if st, err := os.Stat(dest); err == nil && st.IsDir() {
+				dest = filepath.Join(dest, "eai")
+			}
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return err
+			}
+
+			in, err := os.Open(src)
+			if err != nil {
+				return err
+			}
+			defer in.Close()
+
+			tmp := dest + ".tmp"
+			out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+			if err != nil {
+				return fmt.Errorf("failed to write %s: %w", dest, err)
+			}
+			defer out.Close()
+
+			if _, err := io.Copy(out, in); err != nil {
+				return err
+			}
+			if err := out.Close(); err != nil {
+				return err
+			}
+			if err := os.Rename(tmp, dest); err != nil {
+				return err
+			}
+
+			fmt.Printf("installed %s\n", dest)
+			return nil
+		},
+	}
+	installCmd.Flags().String("dest", "", "Install destination file or directory (default: ~/.local/bin/eai)")
+	root.AddCommand(installCmd)
 
 	agentCmd := &cobra.Command{
 		Use:   "agent [task]",

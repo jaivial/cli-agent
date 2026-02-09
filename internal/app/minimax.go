@@ -23,6 +23,8 @@ type MinimaxClient struct {
 	HTTP      *http.Client
 }
 
+var ErrAPIKeyRequired = errors.New("api key is required")
+
 type minimaxRequest struct {
 	Model     string           `json:"model"`
 	MaxTokens int              `json:"max_tokens,omitempty"`
@@ -140,7 +142,7 @@ func (c *MinimaxClient) Complete(ctx context.Context, prompt string) (string, er
 	}
 
 	if c.APIKey == "" {
-		return "", errors.New("api key is required")
+		return "", ErrAPIKeyRequired
 	}
 
 	maxRetries := 2

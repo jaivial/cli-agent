@@ -291,6 +291,18 @@ func (p *PromptBuilder) Build(mode Mode, userInput string) string {
 	return p.BuildWithAnalysis(mode, userInput)
 }
 
+// BuildChat constructs a prompt suitable for interactive chat (human-readable responses).
+func (p *PromptBuilder) BuildChat(mode Mode, userInput string) string {
+	systemPrompt := GetChatSystemPrompt(mode, "")
+
+	context := GetProjectContext()
+	if context != "" {
+		systemPrompt = systemPrompt + "\n\n" + context
+	}
+
+	return fmt.Sprintf("[SYSTEM]\n%s\n\n[USER]\n%s\n", systemPrompt, userInput)
+}
+
 // BuildWithAnalysis constructs the final prompt with automatic task analysis
 func (p *PromptBuilder) BuildWithAnalysis(mode Mode, userInput string) string {
 	// Parse task for hints and complexity

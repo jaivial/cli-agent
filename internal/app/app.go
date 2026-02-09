@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Application struct {
@@ -45,8 +46,23 @@ func NewApplication(cfg Config, mockMode bool) (*Application, error) {
 }
 
 func (a *Application) ExecuteChat(ctx context.Context, mode Mode, input string) (string, error) {
-	prompt := a.Prompter.Build(mode, input)
-	return a.Client.Complete(ctx, prompt)
+	// Interactive TUI chat should produce human-readable output, not raw tool-call JSON.
+	prompt := a.Prompter.BuildChat(mode, input)
+	out, err := a.Client.Complete(ctx, prompt)
+	if err != nil {
+		if errors.Is(err, ErrAPIKeyRequired) {
+			return "No API key configured. Run `/connect` in the TUI or set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`).", nil
+		}
+		return "", err
+	}
+
+	trim := strings.TrimSpace(out)
+	// Safety: if the model (or mock) returns a tool-call JSON blob, don't show it in chat.
+	if strings.HasPrefix(trim, "{") && strings.Contains(trim, "\"tool_calls\"") {
+		return "This chat UI only shows text replies and does not execute tool calls. Use `eai agent \"...\"` for tool-driven tasks, or ask in plain language for a text-only answer.", nil
+	}
+
+	return out, nil
 }
 
 func (a *Application) ExecuteOrchestrate(ctx context.Context, mode Mode, input string, agents int) (string, error) {

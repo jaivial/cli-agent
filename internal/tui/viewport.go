@@ -189,7 +189,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, Message{
 						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
 						Role:      "system",
-						Content:   "connected to minimax api.",
+						Content:   "connected.",
 						Timestamp: time.Now(),
 					})
 				}

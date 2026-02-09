@@ -58,9 +58,10 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Save config
 			s.cfg.MinimaxAPIKey = s.apiKey
-			s.cfg.Model = "minimax-m2.1"
-			s.cfg.BaseURL = "https://api.minimax.io/anthropic/v1/messages"
-			s.cfg.MaxTokens = 2048
+			// Match the TerminalBench setup by default.
+			s.cfg.Model = "glm-4.7"
+			s.cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
+			s.cfg.MaxTokens = 4096
 			s.cfg.Installed = true
 
 			if err := app.SaveConfig(*s.cfg, ""); err != nil {
@@ -112,10 +113,10 @@ func (s *SetupWizard) View() string {
 	var b strings.Builder
 
 	b.WriteString("\n")
-	b.WriteString(titleStyle.Render("connect to minimax"))
+	b.WriteString(titleStyle.Render("connect"))
 	b.WriteString("\n\n")
 
-	b.WriteString(subtitleStyle.Render("enter your api key from minimax.ai"))
+	b.WriteString(subtitleStyle.Render("enter your api key (MINIMAX_API_KEY)"))
 	b.WriteString("\n\n")
 
 	// Input box
