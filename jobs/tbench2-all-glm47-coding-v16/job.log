@@ -1,0 +1,473 @@
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'break-filter-js-from-html' from /home/jaivial/.cache/harbor/tasks/JQfDtvG4qqL3QfwErWynWU/break-filter-js-from-html/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: There's a /app/filter.py script that attempts to remove JavaScript from HTML files to prevent XSS at...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'reshard-c4-data' from /home/jaivial/.cache/harbor/tasks/fDMeF8ncVH8hFRrdHUkDzM/reshard-c4-data/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Help me create two scripts for managing the resharding of my dataset:
+
+1. **/app/compress.py**: A sc...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'llm-inference-batching-scheduler' from /home/jaivial/.cache/harbor/tasks/2Fx6Ues7VLnYo5TdH9smXE/llm-inference-batching-scheduler/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: In this task you will implement an **LLM inference batching scheduler (shape‑aware)**
+for a static g...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'gpt2-codegolf' from /home/jaivial/.cache/harbor/tasks/CGqXnFmcaVcQCTbCZMpg2T/gpt2-codegolf/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have downloaded the gpt-2 weights stored as a TF .ckpt. Write me a dependency-free C file that sam...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'winning-avg-corewars' from /home/jaivial/.cache/harbor/tasks/dWGsQxJELwQFMvHVDc5zuS/winning-avg-corewars/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Write a CoreWars program that achieves a winning average against five classic opponent warriors.
+pMA...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'write-compressor' from /home/jaivial/.cache/harbor/tasks/MWrHdxDHM3npYpRiLMz3iZ/write-compressor/tests
+Preloaded 4 test file(s) into /tests
+Running eai agent with instruction: I have a decompressor in /app/decomp.c. It reads compressed data from stdin and writes the decompres...
+EAI agent completed successfully
+Trial merge-diff-arc-agi-task__SsVALCE failed: Agent setup timed out after 360.0 seconds
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'log-summary-date-ranges' from /home/jaivial/.cache/harbor/tasks/fqGNZJec57abmbsxYbQAz5/log-summary-date-ranges/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given multiple log files stored in /app/logs. Each log file name follows the pattern YYYY-MM...
+EAI agent completed successfully
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'pytorch-model-cli' from /home/jaivial/.cache/harbor/tasks/cEZY7Ut37eqdNnYKPebgYq/pytorch-model-cli/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Your task is to implement a command line tool that can be used to run inference on an MNIST model.
+T...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'largest-eigenval' from /home/jaivial/.cache/harbor/tasks/GZXTJdXif2uoqEMrNXfNyB/largest-eigenval/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Complete the implementation in find_dominant_eigenvalue_and_eigenvector in /app/eigen.py.
+"Dominant"...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'portfolio-optimization' from /home/jaivial/.cache/harbor/tasks/79ekQLXanbbMZMfTk3qzaF/portfolio-optimization/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: You have a Python baseline in portfolio_baseline.py that calculates portfolio risk and return using ...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'path-tracing-reverse' from /home/jaivial/.cache/harbor/tasks/5CV2XfZKatcdbEk2ctQQAF/path-tracing-reverse/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I've compiled a program at /app/mystery. Write a C program /app/mystery.c that performs an identical...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'regex-chess' from /home/jaivial/.cache/harbor/tasks/XyJK3D4eSbPWgNt9Bw4RyU/regex-chess/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Write a JSON file called /app/re.json that is a list of [regex, replacement] pairs. When executed in...
+EAI agent completed successfully
+Trial password-recovery__KihFnJr failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'modernize-scientific-stack' from /home/jaivial/.cache/harbor/tasks/n9YQuCoRJFAyCD3Zs6amRV/modernize-scientific-stack/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: # Modernize Legacy Scientific Computing Stack
+
+The legacy Python 2.7 climate analysis code at `/app/...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'path-tracing' from /home/jaivial/.cache/harbor/tasks/9BGkwkiZs6r3NTmoLCLzr9/path-tracing/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I've put an image at /app/image.ppm that I rendered programmatically. Write a c program image.c that...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'feal-linear-cryptanalysis' from /home/jaivial/.cache/harbor/tasks/LVyG59RRyF7y2PiCy5VT3B/feal-linear-cryptanalysis/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file /app/feal.c implements a FEAL-like encryption function,
+with /app/decrypt.c being the corre...
+EAI agent completed successfully
+Trial torch-tensor-parallelism__joXbrgE failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'distribution-search' from /home/jaivial/.cache/harbor/tasks/PBqbNgPwKfCmnNMFQbSbAJ/distribution-search/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Finding a target probability distribution for LLM confidence metrics:
+
+The confidence of a token pre...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'mteb-retrieve' from /home/jaivial/.cache/harbor/tasks/J63TLMqMZcCeiRe8KAiy5T/mteb-retrieve/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Given the query "terminal-bench" retrieve the document with the 5th highest cosine similarity among ...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'caffe-cifar-10' from /home/jaivial/.cache/harbor/tasks/XUcCMQRrLoqxtCV4Hc9F2a/caffe-cifar-10/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Install the original BVLC Caffe deep learning framework (version 1.0.0) and train a 
+convolutional n...
+EAI agent completed successfully
+Trial prove-plus-comm__yeRXE9w failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'pypi-server' from /home/jaivial/.cache/harbor/tasks/LEz4caXvpzU9rMBzsJnZA6/pypi-server/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Create a python package called vectorops, then build this package and set up a pypi server on port 8...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'multi-source-data-merger' from /home/jaivial/.cache/harbor/tasks/cMPqfgxjNH2qnnDVdWSFb8/multi-source-data-merger/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Merge user data from three different sources with different formats and schemas.
+
+Input files:
+
+- /d...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'configure-git-webserver' from /home/jaivial/.cache/harbor/tasks/c3FnWBpp4RmfpMvyGn8Wpv/configure-git-webserver/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Configure a git server so that I can run on my computer
+    git clone user@server:/git/server
+    ec...
+EAI agent completed successfully
+Trial custom-memory-heap-crash__z4wfuVG failed: Agent setup timed out after 360.0 seconds
+Trial adaptive-rejection-sampler__WnRicPH failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'cobol-modernization' from /home/jaivial/.cache/harbor/tasks/SmKKTsxNnHaHqhzng8SrD2/cobol-modernization/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given a COBOL program located at /app/src/program.cbl. This program reads input data from /a...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'crack-7z-hash' from /home/jaivial/.cache/harbor/tasks/MAyhSNHCZegJvZuPyTitjJ/crack-7z-hash/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You need to create a file called "/app/solution.txt" with the word found in "secret_file.txt" in the...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'chess-best-move' from /home/jaivial/.cache/harbor/tasks/Wz3X4eVncfR6vdDfRM6kXV/chess-best-move/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file chess_board.png has an image of a chess board. It is currently white to move. Write the bes...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'hf-model-inference' from /home/jaivial/.cache/harbor/tasks/DcF3L5bfEpwdBkhfr3hgHe/hf-model-inference/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Set up a local service to run inference with a Hugging Face transformer model.
+
+1. Download the "dis...
+EAI agent completed successfully
+Trial overfull-hbox__Gif2nXu failed: Agent setup timed out after 360.0 seconds
+Trial polyglot-rust-c__csy576t failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'fix-git' from /home/jaivial/.cache/harbor/tasks/kzqjKVWxvHZxV5xyLNLqJi/fix-git/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I just made some changes to my personal site and checked out master, but now I can't find those chan...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'headless-terminal' from /home/jaivial/.cache/harbor/tasks/KSwQXLapvDLmcHTvZcJVQG/headless-terminal/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Implement the provided `BaseTerminal` interface. It provides a simple python interface to send keys ...
+EAI agent completed successfully
+Trial compile-compcert__qe8pKHU failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'schemelike-metacircular-eval' from /home/jaivial/.cache/harbor/tasks/YkDjArg6hKdFYEmdiPrztY/schemelike-metacircular-eval/tests
+Preloaded 67 test file(s) into /tests
+Running eai agent with instruction: Write a file eval.scm that is a metacircular evaluator capable of interpreting the scheme-like langu...
+EAI agent completed successfully
+Trial db-wal-recovery__ELwV96z failed: Agent setup timed out after 360.0 seconds
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'qemu-startup' from /home/jaivial/.cache/harbor/tasks/gHS2mTGhPaYTuJWpCkw4J9/qemu-startup/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Start the /app/alpine.iso image in qemu in such a way that I can connect to it via `telnet 127.0.0.1...
+EAI agent exited with code 1
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'train-fasttext' from /home/jaivial/.cache/harbor/tasks/QUdXqzZFwRrgRZ7SPHyxto/train-fasttext/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Please train a fasttext model on the yelp data in the data/ folder.
+
+The final model size needs to b...
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'video-processing' from /home/jaivial/.cache/harbor/tasks/QU8iD2bMsFXumTCQhnBiGz/video-processing/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Write a script, named jump_analyzer.py, and place it in `/app/jump_analyzer.py` . The script analyze...
+EAI agent completed successfully
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'qemu-alpine-ssh' from /home/jaivial/.cache/harbor/tasks/YiQMoSRPZzKeHRDhZkwmyd/qemu-alpine-ssh/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Start the /app/alpine.iso image in qemu, and then start an ssh server on the alpine linux vm. When y...
+EAI agent exited with code 1
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'kv-store-grpc' from /home/jaivial/.cache/harbor/tasks/JGX6wXigbfSgX6m298mcKW/kv-store-grpc/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You need to build a simple KV store server using grpc that records number values for different strin...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'build-pov-ray' from /home/jaivial/.cache/harbor/tasks/H9EGgCK3p6caXKKnhsqu6a/build-pov-ray/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Build POV-Ray 2.2. Find and download the source archives, extract them to `/app/povray-2.2`, then co...
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'make-doom-for-mips' from /home/jaivial/.cache/harbor/tasks/2gm9aAxh3ufEHTNAcZ8qB3/make-doom-for-mips/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: I have provided /app/doomgeneric/, the source code to doom. I've also wrote a special doomgeneric_im...
+EAI agent completed successfully
+EAI agent completed successfully
+Trial git-multibranch__tDxaAFg failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'tune-mjcf' from /home/jaivial/.cache/harbor/tasks/jWu5FXBKfqdBD9LqMa9a2N/tune-mjcf/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Can you tune this MuJoCo model file (mjcf) such that it takes 60% of the original time or less to si...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'gcode-to-text' from /home/jaivial/.cache/harbor/tasks/JK5CeLoen6gxrbEkrjQ94D/gcode-to-text/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have provided a file called text.gcode. This is a gcode file for a Prusa MK4s. I'm trying to print...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'make-mips-interpreter' from /home/jaivial/.cache/harbor/tasks/LeNjAXy6fbV5X852Td8iV9/make-mips-interpreter/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, the corresponding s...
+EAI agent completed successfully
+Trial install-windows-3.11__JbcsEG2 failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'count-dataset-tokens' from /home/jaivial/.cache/harbor/tasks/V8M9GUmT67TmSKo9FQTdoC/count-dataset-tokens/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Tell me how many deepseek tokens are there in the science domain of the ryanmarten/OpenThoughts-1k-s...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'circuit-fibsqrt' from /home/jaivial/.cache/harbor/tasks/dqWUpJXGGPsFGfnuwx6Car/circuit-fibsqrt/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: The file /app/sim.c is a logic-gate simulator: each line of the file /app/gates.txt should contain a...
+EAI agent completed successfully
+Trial torch-pipeline-parallelism__5UQVu2z failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'mteb-leaderboard' from /home/jaivial/.cache/harbor/tasks/3aN2GgseP4MfXC7ixV7cXB/mteb-leaderboard/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a lot of Scandinavian texts that I need to encode. Please provide me with the name in organiz...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'raman-fitting' from /home/jaivial/.cache/harbor/tasks/kWbDWup9MzjJLPn6gz9P6H/raman-fitting/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given the output file of a Raman Setup. We used it to measure some graphene sample.
+Fit the ...
+EAI agent completed successfully
+Trial extract-moves-from-video__y4AFDnT failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'query-optimize' from /home/jaivial/.cache/harbor/tasks/55spjFHXbhXqhkHUB3xfBL/query-optimize/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: 
+You are given the Open English Wordnet (OEWN) database in SQLite format, located at /app/oewn.sqlit...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'protein-assembly' from /home/jaivial/.cache/harbor/tasks/mJUNThPAPTj7sAa9DCoPrh/protein-assembly/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I am planning an experiment where I'll be testing the stability of dihydrofolate reductase (DHFR) wi...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'code-from-image' from /home/jaivial/.cache/harbor/tasks/KRPXswDf2LBuozQgKhCqnG/code-from-image/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You're given an image of a pseudocode snippet at `/app/code.png`. Implement the intended logic of th...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'extract-elf' from /home/jaivial/.cache/harbor/tasks/3HV9wmSrWRW9TuYurepoFx/extract-elf/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have provided a file a.out that's a compiled C binary. Write me a program extract.js that, when ru...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'fix-code-vulnerability' from /home/jaivial/.cache/harbor/tasks/2XNt9VEmH8r9FJdPeH9UxU/fix-code-vulnerability/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You need to identify and fix the vulnerability in the code according to the Common Weakness Enumerat...
+EAI agent completed successfully
+Trial mailman__672TzeD failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'mcmc-sampling-stan' from /home/jaivial/.cache/harbor/tasks/jAoUooKp48ZpCL53Ra9yUk/mcmc-sampling-stan/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Sample from a hierarchical Bayesian model using R and Stan, and estimate the posterior means of the ...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'filter-js-from-html' from /home/jaivial/.cache/harbor/tasks/SeKnWxFXAqYwFdRQvLn2Wk/filter-js-from-html/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Create a python file /app/filter.py that removes JavaScript from HTML files to prevent XSS attacks. ...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'feal-differential-cryptanalysis' from /home/jaivial/.cache/harbor/tasks/RyWCxfjAf9RhapMxS2dMks/feal-differential-cryptanalysis/tests
+Preloaded 6 test file(s) into /tests
+Running eai agent with instruction: The file /app/feal.py implements a FEAL-like encryption function. Implement a chosen plaintext attac...
+EAI agent completed successfully
+Trial financial-document-processor__MrVXDtv failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'cancel-async-tasks' from /home/jaivial/.cache/harbor/tasks/5pwPaf92MGZBJjvqnuBn9d/cancel-async-tasks/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Create a Python function called `async run_tasks(tasks: list[Callable[[], Awaitable[None]]], max_con...
+EAI agent completed successfully
+Trial regex-log__nzibcgj failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'fix-ocaml-gc' from /home/jaivial/.cache/harbor/tasks/dXxv47w6VWWtstSMMiefPe/fix-ocaml-gc/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have been making some changes to the OCaml garbage collector, improving the sweeping performance b...
+EAI agent completed successfully
+Trial polyglot-c-py__AjXy6Lo failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'build-cython-ext' from /home/jaivial/.cache/harbor/tasks/GCqHhNMgC2jpcy3h8te5A7/build-cython-ext/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: pyknotid is a Python package for computational topology and knot theory.
+I want to use its fast Cyth...
+Trial bn-fit-modify__LUWyQ6D failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'pytorch-model-recovery' from /home/jaivial/.cache/harbor/tasks/axUgVSxE9sjGUEHETA9Ddx/pytorch-model-recovery/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: - You are given a PyTorch state dictionary (/app/weights.pt) representing the weights of a Pytorch m...
+EAI agent completed successfully
+Trial git-leak-recovery__9NBBNV8 failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'sam-cell-seg' from /home/jaivial/.cache/harbor/tasks/n9EXHRQn8C4KGZQgXQEvZU/sam-cell-seg/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: I have annotated histopathology slides with cell masks. The problem is that some of the masks 
+are r...
+EAI agent completed successfully
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'model-extraction-relu-logits' from /home/jaivial/.cache/harbor/tasks/8WGyid6WdyvC3RsCcr7kLU/model-extraction-relu-logits/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a ReLU neural network that you can query by importing `forward.py` and calling forward(x) whi...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'nginx-request-logging' from /home/jaivial/.cache/harbor/tasks/eUViXxKXCzTue7ywZW59ct/nginx-request-logging/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Set up an Nginx web server with advanced request logging and custom configurations. Your task is to:...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'large-scale-text-editing' from /home/jaivial/.cache/harbor/tasks/S2VRUfRKCUQ2hWH9KJzsbK/large-scale-text-editing/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Transform /app/input.csv (1 million rows) to match /app/expected.csv exactly using **keystroke-effic...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'sqlite-db-truncate' from /home/jaivial/.cache/harbor/tasks/2hEZAwigfHAA5cnDNAJvfT/sqlite-db-truncate/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a sqlite database in /app/trunc.db that was corrupted through binary truncation. Recover as m...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'sanitize-git-repo' from /home/jaivial/.cache/harbor/tasks/WNjEws4zKtRNWJABpoU892/sanitize-git-repo/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: Please help sanitize my github repository "dclm" of all API keys.
+
+Please find and remove all such i...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'build-pmars' from /home/jaivial/.cache/harbor/tasks/TXGXVihdFyGLhhWJdjKoXE/build-pmars/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Build pMARS (http://www.koth.org/pmars/) from source with no X server. 
+
+Since koth.org is unreliabl...
+Trial sparql-university__qBsL8ss failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'openssl-selfsigned-cert' from /home/jaivial/.cache/harbor/tasks/Skg3RaRNtgRKSRBoJaSgjx/openssl-selfsigned-cert/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Your company needs a self-signed TLS certificate for an internal development server. Create a self-s...
+EAI agent completed successfully
+Trial rstan-to-pystan__GTMb5GT failed: Agent setup timed out after 360.0 seconds
+Not retrying trial because the maximum number of retries has been reached
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'vulnerable-secret' from /home/jaivial/.cache/harbor/tasks/RkUWMSfgcaHLyc3cnCt62s/vulnerable-secret/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Analyze the following program that contains a secret key. The goal is to extract this secret key and...
+EAI agent completed successfully
+Trial sqlite-with-gcov__Lxi6JNk failed: Agent setup timed out after 360.0 seconds
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'constraints-scheduling' from /home/jaivial/.cache/harbor/tasks/CrxDfvhBFmo3ahvG2RfDM3/constraints-scheduling/tests
+Not retrying trial because the maximum number of retries has been reached
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Find a 1-hour meeting slot for Alice, Bob, and Carol during January 15-19, 2024 (business hours: 9 A...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'dna-insert' from /home/jaivial/.cache/harbor/tasks/Kk55pgeAWyodY7sZSnMpXw/dna-insert/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file titled sequences.fasta contains the sequence for a circular input plasmid, and a desired ou...
+EAI agent completed successfully
+EAI adapter: /home/jaivial/cli-agent/harbor-adapter/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'dna-assembly' from /home/jaivial/.cache/harbor/tasks/ArEmuSGC435pAkSA7cv8qw/dna-assembly/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file titled sequences.fasta contains the following sequences:
+  * input: A circular input plasmi...
+EAI agent completed successfully
