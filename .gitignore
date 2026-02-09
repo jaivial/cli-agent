@@ -1,3 +1,5 @@
 # Local run artifacts
 jobs/
 
+# Large dependency wheels (downloaded artifacts)
+tbench_wheels_cpu/
