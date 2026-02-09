@@ -5865,8 +5865,9 @@ from pathlib import Path
 
 def parse_events(path: str):
     text = Path(path).read_text()
-    starts = re.findall(r"DTSTART:(\\d{8}T\\d{6}Z)", text)
-    ends = re.findall(r"DTEND:(\\d{8}T\\d{6}Z)", text)
+    # Use raw regex strings with a single backslash so \d is treated as a digit class.
+    starts = re.findall(r"DTSTART:(\d{8}T\d{6}Z)", text)
+    ends = re.findall(r"DTEND:(\d{8}T\d{6}Z)", text)
     out = []
     for s, e in zip(starts, ends):
         out.append((datetime.strptime(s, "%Y%m%dT%H%M%SZ"), datetime.strptime(e, "%Y%m%dT%H%M%SZ")))
@@ -5951,27 +5952,26 @@ if best is None:
 best_end = best + timedelta(hours=1)
 uid = f"team-meeting-{best.strftime('%Y%m%d%H%M%S')}@terminal-bench.ai"
 
-ics = (
-    "BEGIN:VCALENDAR\\n"
-    "VERSION:2.0\\n"
-    "PRODID:-//Terminal-Bench//Meeting Scheduler//EN\\n"
-    "CALSCALE:GREGORIAN\\n"
-    "METHOD:PUBLISH\\n"
-    "BEGIN:VEVENT\\n"
-    f"UID:{uid}\\n"
-    f"DTSTART:{best.strftime('%Y%m%dT%H%M%SZ')}\\n"
-    f"DTEND:{best_end.strftime('%Y%m%dT%H%M%SZ')}\\n"
-    "SUMMARY:Team Planning Meeting\\n"
-    "DESCRIPTION:Scheduled team planning meeting for Alice, Bob, and Carol\\n"
-    "ATTENDEE:MAILTO:alice@example.com\\n"
-    "ATTENDEE:MAILTO:bob@example.com\\n"
-    "ATTENDEE:MAILTO:carol@example.com\\n"
-    "LOCATION:Conference Room\\n"
-    "END:VEVENT\\n"
-    "END:VCALENDAR\\n"
-)
+ics = f"""BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Terminal-Bench//Meeting Scheduler//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:{uid}
+DTSTART:{best.strftime('%Y%m%dT%H%M%SZ')}
+DTEND:{best_end.strftime('%Y%m%dT%H%M%SZ')}
+SUMMARY:Team Planning Meeting
+DESCRIPTION:Scheduled team planning meeting for Alice, Bob, and Carol
+ATTENDEE:MAILTO:alice@example.com
+ATTENDEE:MAILTO:bob@example.com
+ATTENDEE:MAILTO:carol@example.com
+LOCATION:Conference Room
+END:VEVENT
+END:VCALENDAR
+"""
 
-Path("/app/meeting_scheduled.ics").write_text(ics)
+Path("/app/meeting_scheduled.ics").write_text(ics.strip() + "\n")
 print(best)
 PY
 `

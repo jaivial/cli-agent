@@ -24,6 +24,7 @@ def load_api_key() -> str:
 
     return os.environ.get("MINIMAX_API_KEY", "")
 
+
 def load_int_env(name: str) -> int | None:
     v = os.environ.get(name, "").strip()
     if not v:
@@ -93,6 +94,34 @@ class EaiAgent(BaseAgent):
 
     async def setup(self, environment: BaseEnvironment) -> None:
         """Upload the eai binary to the environment."""
+
+        # Some images have apt "Release file ... is not valid yet" issues due to clock skew.
+        # Disable apt's date checks so verifier scripts that run apt-get succeed.
+        try:
+            await environment.exec(
+                "if [ -d /etc/apt/apt.conf.d ]; then "
+                "cat > /etc/apt/apt.conf.d/99eai-ignore-release-date << 'EOF'\n"
+                "Acquire::Check-Date \"false\";\n"
+                "Acquire::Check-Valid-Until \"false\";\n"
+                "Acquire::Max-FutureTime \"86400\";\n"
+                "EOF\n"
+                "fi"
+            )
+        except Exception:
+            pass
+
+        # Some tasks' verifiers import OpenCV (cv2). The opencv-python wheel requires
+        # libGL at runtime (libGL.so.1). Install it best-effort when apt is available.
+        # This is cheap (~a few MB) and avoids verifier import failures (e.g. sam-cell-seg).
+        try:
+            await environment.exec(
+                "if command -v apt-get >/dev/null 2>&1; then "
+                "apt-get update -qq || true; "
+                "apt-get install -y -qq libgl1 libglib2.0-0 2>/dev/null || true; "
+                "fi"
+            )
+        except Exception:
+            pass
 
         # Install CA certificates for HTTPS requests (ignore errors if already installed)
         try:
@@ -187,6 +216,7 @@ dependencies = []
         env = {
             "MINIMAX_API_KEY": self.api_key,
             "EAI_SKIP_TLS_VERIFY": "1",
+            "EAI_TBENCH_FASTPATH": "1",
         }
         if self.base_url:
             env["MINIMAX_BASE_URL"] = self.base_url
@@ -196,7 +226,10 @@ dependencies = []
             env["MINIMAX_MAX_TOKENS"] = str(self.max_tokens)
 
         escaped_instruction = shlex.quote(instruction)
-        command = f"/usr/local/bin/eai agent --max-loops {self.max_loops} {escaped_instruction}"
+        # IMPORTANT: Many terminal-bench instructions start with a leading "-"
+        # (markdown bullet). Cobra/pflag will treat such args as flags unless we
+        # terminate flag parsing with "--".
+        command = f"/usr/local/bin/eai agent --max-loops {self.max_loops} -- {escaped_instruction}"
 
         self.logger.info(f"Running eai agent with instruction: {instruction[:100]}...")
 
