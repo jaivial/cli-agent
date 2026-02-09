@@ -32,7 +32,10 @@ func (m helpModel) View() string {
 
 	b.WriteString(helpSectionStyle.Render("commands"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  %s  send message\n", helpKeyStyle.Render("enter")))
+	b.WriteString(fmt.Sprintf("  %s  run agent / send\n", helpKeyStyle.Render("enter")))
+	b.WriteString(fmt.Sprintf("  %s  focus next pane\n", helpKeyStyle.Render("tab")))
+	b.WriteString(fmt.Sprintf("  %s  toggle trace\n", helpKeyStyle.Render("ctrl+t")))
+	b.WriteString(fmt.Sprintf("  %s  cancel run\n", helpKeyStyle.Render("ctrl+c")))
 	b.WriteString(fmt.Sprintf("  %s  switch mode\n", helpKeyStyle.Render("shift+tab")))
 	b.WriteString(fmt.Sprintf("  %s  clear chat\n", helpKeyStyle.Render("x")))
 	b.WriteString(fmt.Sprintf("  %s  quit\n", helpKeyStyle.Render("q")))
@@ -56,7 +59,7 @@ func (m helpModel) View() string {
 	b.WriteString("\n")
 
 	b.WriteString("\n")
-	b.WriteString(helpFooterStyle.Render("q quit | shift+tab mode | enter send"))
+	b.WriteString(helpFooterStyle.Render("tab focus | ctrl+t trace | ctrl+c cancel | shift+tab mode | q quit"))
 
 	return b.String()
 }
