@@ -1692,10 +1692,6 @@ func safeToolArgsPreview(raw json.RawMessage) string {
 		if strings.Contains(ls, "api_key") || strings.Contains(ls, "apikey") || strings.Contains(ls, "secret") || strings.Contains(ls, "token") {
 			return "[redacted]"
 		}
-		// Best-effort: avoid echoing long key-like blobs into the UI.
-		if len(s) >= 24 {
-			return "[redacted]"
-		}
 		return s
 	}
 
