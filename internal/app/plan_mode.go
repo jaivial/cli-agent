@@ -54,6 +54,10 @@ CRITICAL MODE RULES:
 - You may gather context using read-only tools (list_dir, search_files, grep, read_file).
 - Do not ask the user to run shell commands for basic discovery; use tools directly.
 - Stop gathering once you have enough context for a concrete plan.
+- WORKDIR is a default starting point, not a boundary. If the user request clearly points to files outside WORKDIR, inspect those exact paths.
+- Path tips:
+  - You can use `+"`~`"+` (home) in tool paths (e.g., `+"`~/Desktop/eai`"+`).
+  - If the user references common home folders (Desktop/Downloads/Documents/etc), prefer checking under home first (e.g., `+"`Desktop/eai`"+` or `+"`~/Desktop/eai`"+`).
 
 RESPONSE RULES (STRICT):
 - Every response must be exactly ONE of:

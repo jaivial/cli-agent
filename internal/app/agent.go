@@ -1843,16 +1843,46 @@ func (l *AgentLoop) saveState(state *AgentState) {
 }
 
 func (l *AgentLoop) resolvePath(path string) string {
+	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
 	}
+
+	// Expand env vars (e.g., $HOME) and normalize slashes.
+	path = os.ExpandEnv(path)
+	path = filepath.FromSlash(path)
+
+	// Expand "~" to the user's home directory.
+	if path == "~" || strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			if path == "~" {
+				path = home
+			} else {
+				path = filepath.Join(home, strings.TrimPrefix(path, "~"+string(filepath.Separator)))
+			}
+		}
+	}
+
+	// Treat common user folders as home-relative when referenced directly (e.g., "Desktop/eai").
+	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "."+string(filepath.Separator)) && !strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			parts := strings.Split(path, string(filepath.Separator))
+			if len(parts) > 0 {
+				switch strings.ToLower(strings.TrimSpace(parts[0])) {
+				case "desktop", "downloads", "documents", "pictures", "music", "videos":
+					path = filepath.Join(home, path)
+				}
+			}
+		}
+	}
+
 	if filepath.IsAbs(path) {
-		return path
+		return filepath.Clean(path)
 	}
 	if l.WorkDir == "" {
-		return path
+		return filepath.Clean(path)
 	}
-	return filepath.Join(l.WorkDir, path)
+	return filepath.Clean(filepath.Join(l.WorkDir, path))
 }
 
 func (l *AgentLoop) defaultExecTimeout(command string) time.Duration {
