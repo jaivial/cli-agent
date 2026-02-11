@@ -32,6 +32,7 @@ type Config struct {
 	ShowBanner    bool   `yaml:"show_banner"`
 	EnableMouse   bool   `yaml:"enable_mouse"`
 	UseAltScreen  bool   `yaml:"alt_screen"`
+	Permissions   string `yaml:"permissions"` // full-access|dangerously-full-access
 }
 
 func NormalizeModel(model string) string {
@@ -92,6 +93,7 @@ func DefaultConfig() Config {
 		ShowBanner:    false,
 		EnableMouse:   true,
 		UseAltScreen:  true,
+		Permissions:   PermissionsFullAccess,
 	}
 }
 
@@ -106,6 +108,7 @@ func LoadConfig(path string) (Config, error) {
 			if err := decodeConfig(data, &cfg); err == nil {
 				cfg.Model = NormalizeModel(cfg.Model)
 				cfg.BaseURL = NormalizeBaseURL(cfg.BaseURL)
+				cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 				cfg.Installed = true
 				return cfg, nil
 			}
@@ -128,6 +131,7 @@ func LoadConfig(path string) (Config, error) {
 	}
 	cfg.Model = NormalizeModel(cfg.Model)
 	cfg.BaseURL = NormalizeBaseURL(cfg.BaseURL)
+	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 2048
 	}
@@ -140,6 +144,7 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.DefaultMode == "" {
 		cfg.DefaultMode = "plan"
 	}
+	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	return cfg, nil
 }
 

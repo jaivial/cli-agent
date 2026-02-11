@@ -216,7 +216,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	m.messages = append(m.messages, Message{
 		ID:        "welcome-1",
 		Role:      "system",
-		Content:   "eai ready. enter to send, shift+tab to change mode. type /model to switch model or /resume to load a previous session.",
+		Content:   "eai ready. enter to send, shift+tab to change mode. type /model, /resume, or /permissions.",
 		Timestamp: time.Now(),
 	})
 	m.recomputeInputHeight()
@@ -969,6 +969,18 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			input := strings.TrimSpace(m.input.Value())
+			if handled, content, role := m.handlePermissionsCommand(input); handled {
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("%s-%d", role, time.Now().UnixNano()),
+					Role:      role,
+					Content:   content,
+					Timestamp: time.Now(),
+				})
+				m.resetInput()
+				m.updateViewport()
+				m.viewport.GotoBottom()
+				return m, nil
+			}
 			if strings.HasPrefix(input, "/connect") {
 				cfg, _ := app.LoadConfig(app.DefaultConfigPath())
 				wizard := NewSetupWizard(&cfg)
@@ -1948,6 +1960,57 @@ func (m *MainModel) sendMessageWithProgress(query string, progressCh chan<- app.
 		}
 		return aiResponseMsg{response: response}
 	}
+}
+
+func (m *MainModel) handlePermissionsCommand(input string) (handled bool, content string, role string) {
+	trimmed := strings.TrimSpace(input)
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "/permissions") {
+		return false, "", ""
+	}
+
+	if m.app == nil {
+		return true, "permissions command unavailable: app is not initialized", "error"
+	}
+
+	arg := strings.TrimSpace(trimmed[len("/permissions"):])
+	if arg == "" {
+		return true, renderPermissionsStatus(m.app.Config.Permissions), "system"
+	}
+
+	mode, ok := app.ParsePermissionsMode(arg)
+	if !ok {
+		return true, fmt.Sprintf("invalid permissions mode %q. use: /permissions full-access|dangerously-full-access", arg), "error"
+	}
+
+	m.app.Config.Permissions = mode
+	if err := app.SaveConfig(m.app.Config, app.DefaultConfigPath()); err != nil {
+		return true, fmt.Sprintf("permissions updated in-memory (%s), but failed to save config: %v\n\n%s", mode, err, renderPermissionsStatus(mode)), "error"
+	}
+	return true, fmt.Sprintf("permissions updated to %s\n\n%s", mode, renderPermissionsStatus(mode)), "system"
+}
+
+func renderPermissionsStatus(desired string) string {
+	desiredMode := app.NormalizePermissionsMode(desired)
+	effectiveMode, isRoot := app.EffectivePermissionsMode(desiredMode)
+
+	var b strings.Builder
+	b.WriteString("permissions status:\n")
+	b.WriteString("- desired: ")
+	b.WriteString(desiredMode)
+	b.WriteString("\n")
+	b.WriteString("- effective: ")
+	b.WriteString(effectiveMode)
+	b.WriteString("\n")
+	if isRoot {
+		b.WriteString("- running as root: yes\n")
+	} else {
+		b.WriteString("- running as root: no\n")
+	}
+	if desiredMode == app.PermissionsDangerouslyFullAccess && !isRoot {
+		b.WriteString("- note: dangerously-full-access requires launching eai as root (example: sudo -E eai)\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func (m *MainModel) waitForProgress(ch <-chan app.ProgressEvent) tea.Cmd {

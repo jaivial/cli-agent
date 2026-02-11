@@ -25,6 +25,8 @@ const (
 	repoURL = "https://github.com/jaivial/cli-agent"
 )
 
+const permissionsValues = "full-access|dangerously-full-access"
+
 func applyEnvOverrides(cfg *app.Config) {
 	if v := strings.TrimSpace(os.Getenv("EAI_API_KEY")); v != "" {
 		cfg.APIKey = v
@@ -40,8 +42,76 @@ func applyEnvOverrides(cfg *app.Config) {
 			cfg.MaxTokens = n
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("EAI_PERMISSIONS")); v != "" {
+		cfg.Permissions = app.NormalizePermissionsMode(v)
+	}
 	cfg.Model = app.NormalizeModel(cfg.Model)
 	cfg.BaseURL = app.NormalizeBaseURL(cfg.BaseURL)
+	cfg.Permissions = app.NormalizePermissionsMode(cfg.Permissions)
+}
+
+func applyFlagOverrides(cmd *cobra.Command, cfg *app.Config) error {
+	if cfg == nil || cmd == nil {
+		return nil
+	}
+	if v, _ := cmd.Flags().GetString("permissions"); strings.TrimSpace(v) != "" {
+		mode, ok := app.ParsePermissionsMode(v)
+		if !ok {
+			return fmt.Errorf("invalid --permissions value %q (use %s)", v, permissionsValues)
+		}
+		cfg.Permissions = mode
+	}
+	return nil
+}
+
+func formatPermissionsStatus(desired string) string {
+	desiredMode := app.NormalizePermissionsMode(desired)
+	effectiveMode, isRoot := app.EffectivePermissionsMode(desiredMode)
+
+	var b strings.Builder
+	b.WriteString("permissions status:\n")
+	b.WriteString("- desired: ")
+	b.WriteString(desiredMode)
+	b.WriteString("\n")
+	b.WriteString("- effective: ")
+	b.WriteString(effectiveMode)
+	b.WriteString("\n")
+	if isRoot {
+		b.WriteString("- running as root: yes\n")
+	} else {
+		b.WriteString("- running as root: no\n")
+	}
+	if desiredMode == app.PermissionsDangerouslyFullAccess && !isRoot {
+		b.WriteString("- note: dangerously-full-access requires launching eai as root (example: sudo -E eai)\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func handlePermissionsSlash(input string, cfg *app.Config, application *app.Application) (bool, string) {
+	trimmed := strings.TrimSpace(input)
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "/permissions") {
+		return false, ""
+	}
+
+	arg := strings.TrimSpace(trimmed[len("/permissions"):])
+	if arg == "" {
+		return true, formatPermissionsStatus(cfg.Permissions)
+	}
+
+	mode, ok := app.ParsePermissionsMode(arg)
+	if !ok {
+		return true, fmt.Sprintf("invalid permissions mode %q. use: /permissions %s", arg, permissionsValues)
+	}
+
+	cfg.Permissions = mode
+	if application != nil {
+		application.Config.Permissions = mode
+	}
+	if err := app.SaveConfig(*cfg, app.DefaultConfigPath()); err != nil {
+		return true, fmt.Sprintf("permissions updated in-memory (%s), but failed to save config: %v\n\n%s", mode, err, formatPermissionsStatus(mode))
+	}
+	return true, fmt.Sprintf("permissions updated to %s\n\n%s", mode, formatPermissionsStatus(mode))
 }
 
 func getBinaryPath() string {
@@ -58,7 +128,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("    COMPREPLY=()")
 		fmt.Println("    cur=\"${COMP_WORDS[COMP_CWORD]}\"")
 		fmt.Println("    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
-		fmt.Println("    opts=\"agent install resume completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --no-tui --help\"")
+		fmt.Println("    opts=\"agent install resume completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --permissions --no-tui --help\"")
 		fmt.Println("    if [[ $COMP_CWORD -eq 1 ]]; then")
 		fmt.Println("        COMPREPLY=( $(compgen -W \"${opts}\" -- \"${cur}\" )")
 		fmt.Println("    fi")
@@ -74,6 +144,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("        '(-v --version)'{-v,--version}'[print version]' \\")
 		fmt.Println("        '(-n --no-tui)'{-n,--no-tui}'[use simple REPL instead of TUI]' \\")
 		fmt.Println("        '(-m --mode)'{-m,--mode}'[set mode]:mode:(ask architect plan do code debug orchestrate)' \\")
+		fmt.Println("        '--permissions[set permissions mode]:permissions:(full-access dangerously-full-access)' \\")
 		fmt.Println("        '*::command:->command'")
 		fmt.Println("    case $state in")
 		fmt.Println("        command)")
@@ -90,6 +161,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("complete -c eai -s v -l version -d 'Print version'")
 		fmt.Println("complete -c eai -s n -l no-tui -d 'Use simple REPL'")
 		fmt.Println("complete -c eai -s m -l mode -d 'Set mode' -a 'ask architect plan do code debug orchestrate'")
+		fmt.Println("complete -c eai -l permissions -d 'Set permissions mode' -a 'full-access dangerously-full-access'")
 	default:
 		return fmt.Errorf("unsupported shell: %s", shell)
 	}
@@ -120,6 +192,9 @@ func main() {
 				return err
 			}
 			applyEnvOverrides(&cfg)
+			if err := applyFlagOverrides(cmd, &cfg); err != nil {
+				return err
+			}
 
 			mockMode, _ := cmd.Flags().GetBool("mock")
 			application, err := app.NewApplication(cfg, mockMode)
@@ -145,6 +220,10 @@ func main() {
 					}
 					line := strings.TrimSpace(in.Text())
 					if line == "" {
+						continue
+					}
+					if handled, msg := handlePermissionsSlash(line, &cfg, application); handled {
+						fmt.Println(msg)
 						continue
 					}
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -176,6 +255,7 @@ func main() {
 	root.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.Flags().BoolP("version", "v", false, "Print version information")
 	root.Flags().String("completion", "", "Generate shell completion (bash|zsh|fish)")
+	root.PersistentFlags().String("permissions", "", "permissions mode: full-access|dangerously-full-access")
 
 	installCmd := &cobra.Command{
 		Use:   "install",
@@ -257,6 +337,9 @@ func main() {
 				if cfg.APIKey == "" {
 					return fmt.Errorf("EAI_API_KEY not set. Please set it in config or environment")
 				}
+			}
+			if err := applyFlagOverrides(cmd, &cfg); err != nil {
+				return err
 			}
 
 			appInstance, err := app.NewApplication(cfg, agentMock)
@@ -345,6 +428,9 @@ func main() {
 				return err
 			}
 			applyEnvOverrides(&cfg)
+			if err := applyFlagOverrides(cmd, &cfg); err != nil {
+				return err
+			}
 
 			mockMode, _ := cmd.Flags().GetBool("mock")
 			application, err := app.NewApplication(cfg, mockMode)
