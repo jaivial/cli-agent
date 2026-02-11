@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// MockMinimaxClient simulates MiniMax API for testing
+// MockMinimaxClient simulates the LLM API for testing
 type MockMinimaxClient struct {
 	APIKey string
 	Model  string
@@ -30,19 +30,19 @@ func NewMockMinimaxClient(apiKey, model string) *MockMinimaxClient {
 
 func (c *MockMinimaxClient) Complete(ctx context.Context, prompt string) (string, error) {
 	c.Calls++
-	
+
 	// Parse the task from the prompt
 	task := extractTask(prompt)
-	
+
 	// Generate appropriate response based on task
 	response := c.generateResponse(task)
-	
+
 	return response, nil
 }
 
 func (c *MockMinimaxClient) generateResponse(task string) string {
 	task = strings.ToLower(task)
-	
+
 	// Detect intent and generate appropriate command-based response
 	switch {
 	case strings.Contains(task, "list") && strings.Contains(task, "file"):
@@ -110,7 +110,7 @@ func generateReadFileResponse(task string) string {
 	} else if strings.Contains(task, "test.txt") {
 		filename = "test.txt"
 	}
-	
+
 	return fmt.Sprintf(`I'll read the %s file.
 
 {
@@ -131,7 +131,7 @@ func generateCreateFileResponse(task string) string {
 	if strings.Contains(task, "test.txt") {
 		filename = "test.txt"
 	}
-	
+
 	return fmt.Sprintf(`I'll create the %s file with the specified content.
 
 {
@@ -164,7 +164,7 @@ func generateSearchResponse(task string) string {
   ]
 }`
 	}
-	
+
 	if strings.Contains(task, "func") {
 		return `I'll search for 'func' in all .go files.
 
@@ -182,7 +182,7 @@ func generateSearchResponse(task string) string {
   ]
 }`
 	}
-	
+
 	return `I'll search for the requested content.
 
 {
@@ -295,7 +295,7 @@ func generateDirResponse(task string) string {
   ]
 }`
 	}
-	
+
 	if strings.Contains(task, "internal") {
 		return `I'll check if internal directory exists and list it.
 
@@ -311,7 +311,7 @@ func generateDirResponse(task string) string {
   ]
 }`
 	}
-	
+
 	if strings.Contains(task, "create") {
 		return `I'll create the temp_test directory and list it.
 
@@ -327,7 +327,7 @@ func generateDirResponse(task string) string {
   ]
 }`
 	}
-	
+
 	return `I'll list the directory contents.
 
 {
@@ -399,24 +399,24 @@ func MockComplete(ctx context.Context, prompt string) (string, error) {
 func UseMockClient(app *Application) {
 	// Replace the real client with mock
 	app.Client = &MinimaxClient{
-		APIKey: "mock",
-		Model:  "mock",
-		BaseURL: "mock://",
+		APIKey:    "mock",
+		Model:     "mock",
+		BaseURL:   "mock://",
 		MaxTokens: 2048,
-		HTTP: &http.Client{Timeout: 1 * time.Second},
+		HTTP:      &http.Client{Timeout: 1 * time.Second},
 	}
 }
 
 // MockAgentLoop creates an agent loop with mock client
 func MockAgentLoop(maxLoops int, stateDir string, logger *Logger) *AgentLoop {
 	mockClient := &MinimaxClient{
-		APIKey: "mock",
-		Model:  "mock",
-		BaseURL: "mock://",
+		APIKey:    "mock",
+		Model:     "mock",
+		BaseURL:   "mock://",
 		MaxTokens: 2048,
-		HTTP: &http.Client{Timeout: 1 * time.Second},
+		HTTP:      &http.Client{Timeout: 1 * time.Second},
 	}
-	
+
 	return &AgentLoop{
 		Client:   mockClient,
 		Tools:    DefaultTools(),

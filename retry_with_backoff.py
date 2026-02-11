@@ -10,9 +10,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+API_KEY = os.environ.get("EAI_API_KEY", "")
 if not API_KEY:
-    raise SystemExit("MINIMAX_API_KEY is not set")
+    raise SystemExit("EAI_API_KEY is not set")
 TASKS_DIR = "/root/clawd/terminal-bench-2.0"
 OUTPUT_FILE = "retry_with_backoff_results.json"
 
@@ -34,7 +34,7 @@ def retry_task(task, max_retries=3, base_delay=5):
         print(f"  Intento {attempt + 1}/{max_retries} (delay={delay}s)...", end=" ", flush=True)
         
         env = os.environ.copy()
-        env["MINIMAX_API_KEY"] = API_KEY
+        env["EAI_API_KEY"] = API_KEY
         
         try:
             result = subprocess.run(

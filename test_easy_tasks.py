@@ -10,9 +10,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+API_KEY = os.environ.get("EAI_API_KEY", "")
 if not API_KEY:
-    raise SystemExit("MINIMAX_API_KEY is not set")
+    raise SystemExit("EAI_API_KEY is not set")
 TASKS_DIR = "/root/clawd/terminal-bench-2.0"
 
 # Ultra-minimal prompts for easy tasks
@@ -44,7 +44,7 @@ def main():
         print(f"{task[:35]:35s}...", end=" ", flush=True)
         
         env = os.environ.copy()
-        env["MINIMAX_API_KEY"] = API_KEY
+        env["EAI_API_KEY"] = API_KEY
         
         try:
             result = subprocess.run(

@@ -51,7 +51,9 @@ func (m helpModel) View() string {
 
 	b.WriteString(helpSectionStyle.Render("setup"))
 	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("  /connect  configure api key"))
+	b.WriteString(helpDescriptionStyle.Render("  /connect  choose provider + auth mode and set EAI_API_KEY"))
+	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("  /model    choose model (glm-4.7|glm-5)"))
 	b.WriteString("\n")
 	b.WriteString(helpDescriptionStyle.Render("  /resume   pick a previous session"))
 	b.WriteString("\n")

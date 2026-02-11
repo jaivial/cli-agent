@@ -42,7 +42,7 @@ func isLikelyConfigError(err error) bool {
 		return false
 	}
 	s := strings.ToLower(err.Error())
-	if strings.Contains(s, "api key is required") || strings.Contains(s, "minimax api key is required") {
+	if strings.Contains(s, "api key is required") {
 		return true
 	}
 	if strings.Contains(s, "insufficient balance") || strings.Contains(s, "no resource package") {

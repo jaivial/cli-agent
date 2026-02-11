@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-MiniMax API Parser Testing Loop
+Z.AI API Parser Testing Loop
 
 This script:
-1. Tests the CLI agent with real MiniMax API
+1. Tests the CLI agent with real Z.AI API
 2. Captures responses that fail parsing
 3. Analyzes the response format
 4. Reports parsing issues
@@ -66,7 +66,7 @@ def run_test(task_data):
         capture_output=True,
         text=True,
         timeout=60,
-        env={"MINIMAX_API_KEY": os.environ.get("MINIMAX_API_KEY", "")}
+        env={"EAI_API_KEY": os.environ.get("EAI_API_KEY", "")}
     )
     
     return {
@@ -169,7 +169,7 @@ def main():
     os.chdir("/Users/usuario/Desktop/cli-agent")
     
     print("=" * 60)
-    print("MiniMax API Parser Testing Loop")
+    print("Z.AI API Parser Testing Loop")
     print("=" * 60)
     print(f"Started: {datetime.now().isoformat()}")
     print()

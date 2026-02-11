@@ -84,6 +84,10 @@ type MainModel struct {
 	planDecisionChoice int
 	pendingPlanText    string
 	pendingPlanContext string
+
+	modelPickerActive bool
+	modelPickerIndex  int
+	modelOptions      []string
 }
 
 type Message struct {
@@ -198,6 +202,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 		showBanner:         application != nil && application.Config.ShowBanner,
 		verbosity:          verbosity,
 		timelineEnabled:    timelineEnabled,
+		modelOptions:       append([]string(nil), app.SupportedModels...),
 	}
 	if m.verbosity == "" {
 		m.verbosity = "compact"
@@ -211,7 +216,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	m.messages = append(m.messages, Message{
 		ID:        "welcome-1",
 		Role:      "system",
-		Content:   "eai ready. enter to send, shift+tab to change mode. type /resume to load a previous session.",
+		Content:   "eai ready. enter to send, shift+tab to change mode. type /model to switch model or /resume to load a previous session.",
 		Timestamp: time.Now(),
 	})
 	m.recomputeInputHeight()
@@ -402,6 +407,60 @@ func (m *MainModel) closeResumePicker() {
 	m.input.Focus()
 }
 
+func (m *MainModel) openModelPicker() {
+	m.modelPickerActive = true
+	if len(m.modelOptions) == 0 {
+		m.modelOptions = append([]string(nil), app.SupportedModels...)
+	}
+
+	current := app.DefaultModel
+	if m.app != nil {
+		if model := strings.TrimSpace(m.app.Config.Model); model != "" {
+			current = model
+		} else if m.app.Client != nil && strings.TrimSpace(m.app.Client.Model) != "" {
+			current = m.app.Client.Model
+		}
+	}
+	current = app.NormalizeModel(current)
+
+	m.modelPickerIndex = 0
+	for i, option := range m.modelOptions {
+		if strings.EqualFold(strings.TrimSpace(option), current) {
+			m.modelPickerIndex = i
+			break
+		}
+	}
+}
+
+func (m *MainModel) closeModelPicker() {
+	m.modelPickerActive = false
+	m.input.Focus()
+}
+
+func (m *MainModel) selectModelAt(index int) string {
+	if index < 0 || index >= len(m.modelOptions) {
+		return ""
+	}
+	model := app.NormalizeModel(m.modelOptions[index])
+	if m.app == nil {
+		return model
+	}
+	cfg := m.app.Config
+	cfg.Model = model
+	cfg.BaseURL = app.NormalizeBaseURL(cfg.BaseURL)
+	if err := app.SaveConfig(cfg, app.DefaultConfigPath()); err != nil {
+		m.messages = append(m.messages, Message{
+			ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
+			Role:      "error",
+			Content:   fmt.Sprintf("failed to save model: %v", err),
+			Timestamp: time.Now(),
+		})
+		return ""
+	}
+	m.app.ReloadClient(cfg)
+	return model
+}
+
 func (m *MainModel) resumeSelectedSession() error {
 	if m.app == nil {
 		return fmt.Errorf("application unavailable")
@@ -438,7 +497,13 @@ func (m *MainModel) statusBarHeight() int {
 
 func (m *MainModel) inputAreaHeight() int {
 	// Activity line + bordered textarea (top and bottom border + content lines).
-	return 1 + 2 + m.input.Height()
+	height := 1 + 2 + m.input.Height()
+	if m.modelPickerActive {
+		if pickerHeight := lipgloss.Height(m.renderModelPicker()); pickerHeight > 0 {
+			height += pickerHeight + 1
+		}
+	}
+	return height
 }
 
 func (m *MainModel) recomputeInputHeight() bool {
@@ -774,6 +839,61 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.modelPickerActive {
+			switch {
+			case key.Matches(msg, m.help.keys.Quit):
+				return m, tea.Quit
+			}
+
+			switch msg.String() {
+			case "up", "k":
+				if len(m.modelOptions) > 0 {
+					m.modelPickerIndex--
+					if m.modelPickerIndex < 0 {
+						m.modelPickerIndex = len(m.modelOptions) - 1
+					}
+				}
+				return m, nil
+			case "down", "j":
+				if len(m.modelOptions) > 0 {
+					m.modelPickerIndex = (m.modelPickerIndex + 1) % len(m.modelOptions)
+				}
+				return m, nil
+			}
+
+			switch msg.Type {
+			case tea.KeyEsc:
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				m.closeModelPicker()
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+				}
+				return m, nil
+			case tea.KeyEnter:
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				selected := m.selectModelAt(m.modelPickerIndex)
+				m.closeModelPicker()
+				if selected != "" {
+					m.messages = append(m.messages, Message{
+						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+						Role:      "system",
+						Content:   "model set to " + selected,
+						Timestamp: time.Now(),
+					})
+				}
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+				}
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
 		if m.planDecisionActive {
 			switch msg.String() {
 			case "up", "k":
@@ -867,13 +987,23 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, Message{
 						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
 						Role:      "system",
-						Content:   "connected.",
+						Content:   wizard.Summary() + " (applied without restart).",
 						Timestamp: time.Now(),
 					})
 				}
 				m.resetInput()
 				m.updateViewport()
 				m.viewport.GotoBottom()
+				return m, nil
+			}
+			if strings.HasPrefix(strings.ToLower(input), "/model") {
+				m.resetInput()
+				m.openModelPicker()
+				m.applyLayout()
+				m.updateViewport()
+				if m.stickToBottom || m.viewport.AtBottom() {
+					m.viewport.GotoBottom()
+				}
 				return m, nil
 			}
 			if strings.HasPrefix(strings.ToLower(input), "/resume") {
@@ -1578,12 +1708,52 @@ func (m *MainModel) renderLoadingCubes(count int) string {
 	return b.String()
 }
 
+func (m *MainModel) renderModelPicker() string {
+	if !m.modelPickerActive || len(m.modelOptions) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Render("select model")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("up/down to navigate, enter to select, esc to cancel")
+	b.WriteString(title)
+	b.WriteString("\n")
+	b.WriteString(hint)
+	b.WriteString("\n")
+
+	for i, model := range m.modelOptions {
+		line := "  " + model
+		if i == m.modelPickerIndex {
+			line = "> " + model
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Bold(true).Render(line)
+		} else {
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2")).Render(line)
+		}
+		b.WriteString(line)
+		if i < len(m.modelOptions)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#44475A")).
+		Padding(0, 1).
+		Width(m.chatAreaWidth() - 2).
+		Render(b.String())
+}
+
 func (m *MainModel) renderInputArea() string {
 	var result strings.Builder
 
 	// Reserve one spacer line above input for stable layout; live thinking and
 	// reasoning appear in the chat area as status lines.
 	result.WriteString("\n")
+
+	if picker := m.renderModelPicker(); picker != "" {
+		result.WriteString(picker)
+		result.WriteString("\n")
+	}
 
 	// Input box with thin border
 	inputBox := lipgloss.NewStyle().

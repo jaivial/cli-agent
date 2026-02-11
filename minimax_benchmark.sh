@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}"
+: "${EAI_API_KEY:?EAI_API_KEY is required}"
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -11,7 +11,7 @@ tasks=(
     "Read the contents of go.mod"
 )
 
-echo "Running MiniMax API Benchmark..."
+echo "Running Z.AI API Benchmark..."
 echo "================================"
 
 success=0

@@ -87,7 +87,7 @@ class TerminalBenchHarness:
                 timeout=self.max_duration_sec,
                 env={
                     **os.environ,
-                    "MINIMAX_API_KEY": os.environ.get("MINIMAX_API_KEY", "")
+                    "EAI_API_KEY": os.environ.get("EAI_API_KEY", "")
                 }
             )
             
@@ -111,7 +111,7 @@ class TerminalBenchHarness:
                 error = f"Exit code {result.returncode}: {error}"
             else:
                 # Check for timeout or other issues
-                if "Error" in output and "MINIMAX_API_KEY" not in output:
+                if "Error" in output and "EAI_API_KEY" not in output:
                     status = TaskStatus.ERROR
                 else:
                     status = TaskStatus.SUCCESS

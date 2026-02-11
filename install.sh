@@ -163,10 +163,10 @@ create_settings() {
     log_info "Creating settings file..."
     cat > "${settings_path}" << 'EOF'
 # EAI CLI Agent Configuration
-minimax_api_key: ""
-base_url: "https://api.minimax.io/anthropic/v1/messages"
-model: "minimax-m2.1"
-max_tokens: 2048
+api_key: ""
+base_url: "https://api.z.ai/api/paas/v4/chat/completions"
+model: "glm-4.7"
+max_tokens: 4096
 max_parallel_agents: 50
 default_mode: "plan"
 safe_mode: true
@@ -193,7 +193,7 @@ print_summary() {
     echo ""
     echo "To get started:"
     echo "  1. Run 'eai' to start the CLI agent"
-    echo "  2. Type '/connect' to configure your MiniMax API key"
+    echo "  2. Type '/connect' to configure your API key"
     echo ""
     echo "For more info: https://github.com/${REPO_OWNER}/${REPO_NAME}"
     echo ""

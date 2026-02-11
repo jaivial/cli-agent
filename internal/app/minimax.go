@@ -25,27 +25,6 @@ type MinimaxClient struct {
 
 var ErrAPIKeyRequired = errors.New("api key is required")
 
-type minimaxRequest struct {
-	Model     string           `json:"model"`
-	MaxTokens int              `json:"max_tokens,omitempty"`
-	Messages  []minimaxMessage `json:"messages"`
-}
-
-type minimaxMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type minimaxResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    int    `json:"code"`
-	} `json:"error,omitempty"`
-}
-
 // Z.ai is compatible with an OpenAI-style /chat/completions API.
 // Docs: https://docs.z.ai/api-reference/llm/chat-completion.md
 type zaiChatCompletionRequest struct {
@@ -86,29 +65,21 @@ type zaiChatCompletionResponse struct {
 	} `json:"error,omitempty"`
 }
 
-type anthropicResponse struct {
-	Content []struct {
-		Type      string `json:"type"`
-		Text      string `json:"text,omitempty"`
-		Thinking  string `json:"thinking,omitempty"`
-		Signature string `json:"signature,omitempty"`
-	} `json:"content"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error,omitempty"`
-	StopReason string `json:"stop_reason,omitempty"`
-}
-
 func NewMinimaxClient(apiKey, model, baseURL string, maxTokens int) *MinimaxClient {
-	if model == "" {
-		model = "minimax-m2.1"
-	}
-	if baseURL == "" {
-		baseURL = "https://api.minimax.io/anthropic/v1/messages"
+	mockMode := strings.EqualFold(strings.TrimSpace(apiKey), "mock") || strings.EqualFold(strings.TrimSpace(baseURL), "mock://")
+	if mockMode {
+		if model == "" {
+			model = "mock"
+		}
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = "mock://"
+		}
+	} else {
+		model = NormalizeModel(model)
+		baseURL = NormalizeBaseURL(baseURL)
 	}
 	if maxTokens <= 0 {
-		maxTokens = 16384
+		maxTokens = 4096
 	}
 
 	// Create HTTP client with optional TLS skip for container environments.
@@ -180,12 +151,8 @@ func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string,
 			reqCtx, cancel = context.WithTimeout(ctx, reqTimeout)
 		}
 
-		// Z.ai: /chat/completions (OpenAI-style)
-		if isZAiBaseURL(c.BaseURL) {
-			out, err = c.completeZAiChatCompletions(reqCtx, prompt, onReasoning)
-		} else {
-			out, err = c.completeMinimaxAnthropic(reqCtx, prompt, onReasoning)
-		}
+		// Z.AI: /chat/completions (OpenAI-style)
+		out, err = c.completeZAiChatCompletions(reqCtx, prompt, onReasoning)
 		if cancel != nil {
 			cancel()
 		}
@@ -234,116 +201,6 @@ func isRetryableLLMError(err error) bool {
 		}
 	}
 	return false
-}
-
-func (c *MinimaxClient) completeMinimaxAnthropic(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
-
-	reqBody := minimaxRequest{
-		Model:     c.Model,
-		MaxTokens: c.MaxTokens,
-		Messages:  []minimaxMessage{{Role: "user", Content: prompt}},
-	}
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL, bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Authorization", "Bearer "+c.APIKey)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("x-api-key", c.APIKey)
-	request.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := c.HTTP.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("api request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %v", err)
-	}
-
-	if resp.StatusCode >= 300 {
-		// Try to parse error response
-		var errResp struct {
-			Error   string `json:"error"`
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(bodyBytes, &errResp)
-		if errResp.Message != "" {
-			return "", fmt.Errorf("minimax api error: status %d, message: %s", resp.StatusCode, errResp.Message)
-		}
-		if errResp.Error != "" {
-			return "", fmt.Errorf("minimax api error: status %d, error: %s", resp.StatusCode, errResp.Error)
-		}
-		return "", fmt.Errorf("minimax api error: status %d, response: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Try to parse Anthropic format response first (since endpoint is /anthropic/v1/messages)
-	var anthropicResp anthropicResponse
-	if err := json.Unmarshal(bodyBytes, &anthropicResp); err == nil {
-		if anthropicResp.Error != nil {
-			return "", fmt.Errorf("anthropic api error: %s", anthropicResp.Error.Message)
-		}
-
-		// Collect text content, handling both regular text and thinking blocks
-		var textContent string
-		var thinkingContent string
-
-		for _, content := range anthropicResp.Content {
-			switch content.Type {
-			case "text":
-				if content.Text != "" {
-					textContent = content.Text
-				}
-			case "thinking":
-				// Store thinking content as fallback if no text content
-				if content.Thinking != "" {
-					thinkingContent = content.Thinking
-				}
-			}
-		}
-		if onReasoning != nil && strings.TrimSpace(thinkingContent) != "" {
-			onReasoning(thinkingContent)
-		}
-
-		// Prefer text content, fall back to thinking content if needed
-		if textContent != "" {
-			return textContent, nil
-		}
-
-		// If only thinking content and stop_reason is max_tokens,
-		// the model ran out of tokens during thinking - return thinking as partial result
-		if thinkingContent != "" {
-			// Extract any actionable content from thinking
-			// This helps when the model thinks through tool calls but doesn't emit them
-			return extractActionableContent(thinkingContent), nil
-		}
-	}
-
-	// Fall back to Minimax format
-	var minimaxResp minimaxResponse
-	if err := json.Unmarshal(bodyBytes, &minimaxResp); err == nil {
-		if minimaxResp.Error != nil {
-			return "", fmt.Errorf("minimax api error: code %d, message: %s", minimaxResp.Error.Code, minimaxResp.Error.Message)
-		}
-		if len(minimaxResp.Content) > 0 && minimaxResp.Content[0].Text != "" {
-			return minimaxResp.Content[0].Text, nil
-		}
-	}
-
-	// If no valid response found
-	return "", fmt.Errorf("invalid api response format: %s", string(bodyBytes))
-}
-
-func isZAiBaseURL(baseURL string) bool {
-	u := strings.ToLower(strings.TrimSpace(baseURL))
-	return strings.Contains(u, "api.z.ai")
 }
 
 func zaiChatCompletionsURL(baseURL string) string {

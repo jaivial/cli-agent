@@ -8,9 +8,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+API_KEY = os.environ.get("EAI_API_KEY", "")
 if not API_KEY:
-    raise SystemExit("MINIMAX_API_KEY is not set")
+    raise SystemExit("EAI_API_KEY is not set")
 TASKS_DIR = "/root/clawd/terminal-bench-2.0"
 
 def get_task_instruction(task_name):
@@ -23,7 +23,7 @@ tasks = sorted([d.name for d in Path(TASKS_DIR).iterdir() if d.is_dir()])
 print(f"📋 Total tasks: {len(tasks)}")
 
 # Calculate reasonable delay to avoid rate limiting
-# MiniMax typical limits: ~60 RPM = 1 request/second
+# Z.AI typical limits: ~60 RPM = 1 request/second
 REQUEST_DELAY = 2.0  # seconds between requests
 
 print("🧪 Terminal-Bench 2.0 - OPTIMIZED (Full context, delays)")
@@ -44,7 +44,7 @@ for i, task in enumerate(tasks, 1):
     print(f"[{i:2d}/{len(tasks)}] {task[:28]:28s}...", end=" ", flush=True)
     
     env = os.environ.copy()
-    env["MINIMAX_API_KEY"] = API_KEY
+    env["EAI_API_KEY"] = API_KEY
     
     try:
         result = subprocess.run(

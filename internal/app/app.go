@@ -30,7 +30,7 @@ func NewApplication(cfg Config, mockMode bool) (*Application, error) {
 		// Create mock client for testing
 		client = NewMinimaxClient("mock", "mock", "mock://", cfg.MaxTokens)
 	} else {
-		client = NewMinimaxClient(cfg.MinimaxAPIKey, cfg.Model, cfg.BaseURL, cfg.MaxTokens)
+		client = NewMinimaxClient(cfg.APIKey, cfg.Model, cfg.BaseURL, cfg.MaxTokens)
 	}
 
 	jobPath := filepath.Join(os.TempDir(), "cli-agent", "jobs.json")
@@ -693,7 +693,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 
 		// Avoid confusing agent-loop failures when API key is missing.
 		if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
-			return "No API key configured. Run `/connect` in the TUI or set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`).", nil
+			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 		}
 
 		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
@@ -725,7 +725,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 	out, err := completeChatWithProgress(ctx, a.Client, prompt, progress, true)
 	if err != nil {
 		if errors.Is(err, ErrAPIKeyRequired) {
-			return "No API key configured. Run `/connect` in the TUI or set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`).", nil
+			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 		}
 		return "", err
 	}
@@ -904,7 +904,7 @@ func (a *Application) ExecuteChatInSessionWithProgressEvents(
 		}
 		if err != nil {
 			if errors.Is(err, ErrAPIKeyRequired) {
-				return "No API key configured. Run `/connect` in the TUI or set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`).", nil
+				return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 			}
 			return "", err
 		}
@@ -1039,5 +1039,5 @@ func (a *Application) RunCommand(ctx context.Context, command string, background
 // ReloadClient updates the client with new configuration
 func (a *Application) ReloadClient(cfg Config) {
 	a.Config = cfg
-	a.Client = NewMinimaxClient(cfg.MinimaxAPIKey, cfg.Model, cfg.BaseURL, cfg.MaxTokens)
+	a.Client = NewMinimaxClient(cfg.APIKey, cfg.Model, cfg.BaseURL, cfg.MaxTokens)
 }

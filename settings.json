@@ -1,7 +1,7 @@
-minimax_api_key: ''
-base_url: https://api.minimax.io/anthropic/v1/messages
-model: minimax-m2.1
-max_tokens: 16384
+api_key: ''
+base_url: https://api.z.ai/api/paas/v4/chat/completions
+model: glm-4.7
+max_tokens: 4096
 max_parallel_agents: 50
 mode: plan
 safe_mode: true

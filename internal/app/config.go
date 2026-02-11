@@ -4,12 +4,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	DefaultBaseURL = "https://api.z.ai/api/paas/v4/chat/completions"
+	DefaultModel   = "glm-4.7"
+	ModelGLM5      = "glm-5"
+)
+
+var SupportedModels = []string{DefaultModel, ModelGLM5}
+
 type Config struct {
-	MinimaxAPIKey     string `yaml:"minimax_api_key"`
+	APIKey            string `yaml:"eai_api_key"`
 	BaseURL           string `yaml:"base_url"`
 	Model             string `yaml:"model"`
 	MaxTokens         int    `yaml:"max_tokens"`
@@ -25,12 +34,54 @@ type Config struct {
 	UseAltScreen  bool   `yaml:"alt_screen"`
 }
 
+func NormalizeModel(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case DefaultModel:
+		return DefaultModel
+	case ModelGLM5:
+		return ModelGLM5
+	default:
+		return DefaultModel
+	}
+}
+
+func NormalizeBaseURL(baseURL string) string {
+	url := strings.TrimSpace(baseURL)
+	if url == "" {
+		return DefaultBaseURL
+	}
+	if strings.EqualFold(url, "mock://") {
+		return "mock://"
+	}
+	if strings.Contains(strings.ToLower(url), "api.z.ai") {
+		return strings.TrimRight(url, "/")
+	}
+	// Enforce Z.AI as the only provider.
+	return DefaultBaseURL
+}
+
+func decodeConfig(data []byte, cfg *Config) error {
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return err
+	}
+
+	// Backward-compat migration for old config key name.
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		var legacy struct {
+			LegacyAPIKey string `yaml:"api_key"`
+		}
+		_ = yaml.Unmarshal(data, &legacy)
+		if strings.TrimSpace(legacy.LegacyAPIKey) != "" {
+			cfg.APIKey = strings.TrimSpace(legacy.LegacyAPIKey)
+		}
+	}
+	return nil
+}
+
 func DefaultConfig() Config {
 	return Config{
-		// Default to the GLM-4.7 coding endpoint we use for TerminalBench.
-		// Users can override via config or env vars MINIMAX_BASE_URL/MINIMAX_MODEL.
-		BaseURL:           "https://api.z.ai/api/coding/paas/v4/chat/completions",
-		Model:             "glm-4.7",
+		BaseURL:           DefaultBaseURL,
+		Model:             DefaultModel,
 		MaxTokens:         4096,
 		MaxParallelAgents: 50,
 		DefaultMode:       "plan",
@@ -52,7 +103,9 @@ func LoadConfig(path string) (Config, error) {
 		binaryDir := filepath.Dir(execPath)
 		binaryConfig := filepath.Join(binaryDir, "settings.json")
 		if data, err := os.ReadFile(binaryConfig); err == nil {
-			if err := yaml.Unmarshal(data, &cfg); err == nil {
+			if err := decodeConfig(data, &cfg); err == nil {
+				cfg.Model = NormalizeModel(cfg.Model)
+				cfg.BaseURL = NormalizeBaseURL(cfg.BaseURL)
 				cfg.Installed = true
 				return cfg, nil
 			}
@@ -70,15 +123,11 @@ func LoadConfig(path string) (Config, error) {
 		}
 		return cfg, err
 	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := decodeConfig(data, &cfg); err != nil {
 		return cfg, err
 	}
-	if cfg.Model == "" {
-		cfg.Model = "glm-4.7"
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
-	}
+	cfg.Model = NormalizeModel(cfg.Model)
+	cfg.BaseURL = NormalizeBaseURL(cfg.BaseURL)
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 2048
 	}

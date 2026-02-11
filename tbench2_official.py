@@ -10,9 +10,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+API_KEY = os.environ.get("EAI_API_KEY", "")
 if not API_KEY:
-    raise SystemExit("MINIMAX_API_KEY is not set")
+    raise SystemExit("EAI_API_KEY is not set")
 TASKS_DIR = "/root/clawd/terminal-bench-2.0"
 
 def get_task_instruction(task_name):
@@ -26,7 +26,7 @@ print(f"📋 OFICIAL BENCHMARK: {len(tasks)} tasks")
 
 print("🧪 Terminal-Bench 2.0 - OFICIAL COMPLETO")
 print("="*60)
-print(f"Modelo: minimax/MiniMax-M2.1")
+print(f"Modelo: glm-4.7")
 print(f"Mejoras: Enhanced Prompt + Retry Logic")
 print()
 
@@ -41,7 +41,7 @@ for i, task in enumerate(tasks, 1):
     print(f"[{i:2d}/{len(tasks)}] {task[:30]:30s}...", end=" ", flush=True)
     
     env = os.environ.copy()
-    env["MINIMAX_API_KEY"] = API_KEY
+    env["EAI_API_KEY"] = API_KEY
     
     try:
         result = subprocess.run(
@@ -92,7 +92,7 @@ else:
 output = {
     "benchmark": "Terminal-Bench 2.0 OFICIAL",
     "timestamp": datetime.now().isoformat(),
-    "model": "minimax/MiniMax-M2.1",
+    "model": "glm-4.7",
     "improvements": ["enhanced_system_prompt", "retry_with_backoff"],
     "summary": {"total": total, "success": success, "failed": failed, "timeout": timeout, "rate": rate},
     "tasks": results

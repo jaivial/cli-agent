@@ -10,6 +10,22 @@ import (
 	"cli-agent/internal/app"
 )
 
+type setupStep int
+
+const (
+	stepProvider setupStep = iota
+	stepAuthMethod
+	stepAPIKey
+)
+
+const (
+	providerMiniMax = "MiniMax"
+	providerZAI     = "z.ai"
+
+	authCodingPlan = "Coding Plan"
+	authAPIKey     = "API Key"
+)
+
 type SetupWizard struct {
 	apiKey    string
 	statusMsg string
@@ -19,19 +35,30 @@ type SetupWizard struct {
 	cfg       *app.Config
 	width     int
 	height    int
+	step      setupStep
+
+	providers []string
+	authModes []string
+
+	providerIndex int
+	authModeIndex int
 }
 
 func NewSetupWizard(cfg *app.Config) *SetupWizard {
 	ti := textinput.New()
 	ti.Placeholder = "paste your api key here..."
-	ti.Focus()
 	ti.Width = 50
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '•'
 
 	return &SetupWizard{
-		cfg:   cfg,
-		input: ti,
+		cfg:       cfg,
+		input:     ti,
+		step:      stepProvider,
+		providers: []string{providerMiniMax, providerZAI},
+		authModes: []string{authCodingPlan, authAPIKey},
+		// Start with z.ai selected by default.
+		providerIndex: 1,
 	}
 }
 
@@ -45,37 +72,108 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
 			s.done = true
 			return s, tea.Quit
+		}
+
+		switch msg.String() {
+		case "esc":
+			switch s.step {
+			case stepAPIKey:
+				s.statusMsg = ""
+				s.input.Blur()
+				if s.selectedProvider() == providerZAI {
+					s.step = stepAuthMethod
+				} else {
+					s.step = stepProvider
+				}
+				return s, nil
+			case stepAuthMethod:
+				s.statusMsg = ""
+				s.step = stepProvider
+				return s, nil
+			default:
+				s.done = true
+				return s, tea.Quit
+			}
 
 		case "enter":
-			s.apiKey = strings.TrimSpace(s.input.Value())
-			if s.apiKey == "" {
-				s.statusMsg = "api key cannot be empty"
+			switch s.step {
+			case stepProvider:
+				s.statusMsg = ""
+				if s.selectedProvider() == providerZAI {
+					s.step = stepAuthMethod
+				} else {
+					s.step = stepAPIKey
+					s.input.SetValue("")
+					s.input.Focus()
+				}
 				return s, nil
-			}
-
-			// Save config
-			s.cfg.MinimaxAPIKey = s.apiKey
-			// Match the TerminalBench setup by default.
-			s.cfg.Model = "glm-4.7"
-			s.cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
-			s.cfg.MaxTokens = 4096
-			s.cfg.Installed = true
-
-			if err := app.SaveConfig(*s.cfg, app.DefaultConfigPath()); err != nil {
-				s.statusMsg = "failed to save: " + err.Error()
+			case stepAuthMethod:
+				s.statusMsg = ""
+				s.step = stepAPIKey
+				s.input.SetValue("")
+				s.input.Focus()
 				return s, nil
-			}
+			case stepAPIKey:
+				s.apiKey = strings.TrimSpace(s.input.Value())
+				if s.apiKey == "" {
+					s.statusMsg = "api key cannot be empty"
+					return s, nil
+				}
 
-			s.saved = true
-			s.done = true
-			return s, tea.Quit
+				// Save config and apply selected provider/mode.
+				s.cfg.APIKey = s.apiKey
+				s.cfg.Model = app.DefaultModel
+				s.cfg.MaxTokens = 4096
+				s.cfg.Installed = true
+
+				if s.selectedProvider() == providerZAI {
+					if s.selectedAuthMode() == authCodingPlan {
+						s.cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4"
+					} else {
+						s.cfg.BaseURL = "https://api.z.ai/api/paas/v4"
+					}
+				} else {
+					// MiniMax entry remains available as requested.
+					s.cfg.BaseURL = "https://api.z.ai/api/paas/v4"
+				}
+
+				if err := app.SaveConfig(*s.cfg, app.DefaultConfigPath()); err != nil {
+					s.statusMsg = "failed to save: " + err.Error()
+					return s, nil
+				}
+
+				s.saved = true
+				s.done = true
+				return s, tea.Quit
+			}
 
 		default:
-			s.input, cmd = s.input.Update(msg)
-			return s, cmd
+			switch s.step {
+			case stepProvider:
+				switch msg.String() {
+				case "up", "k":
+					s.providerIndex = (s.providerIndex - 1 + len(s.providers)) % len(s.providers)
+					return s, nil
+				case "down", "j":
+					s.providerIndex = (s.providerIndex + 1) % len(s.providers)
+					return s, nil
+				}
+			case stepAuthMethod:
+				switch msg.String() {
+				case "up", "k":
+					s.authModeIndex = (s.authModeIndex - 1 + len(s.authModes)) % len(s.authModes)
+					return s, nil
+				case "down", "j":
+					s.authModeIndex = (s.authModeIndex + 1) % len(s.authModes)
+					return s, nil
+				}
+			case stepAPIKey:
+				s.input, cmd = s.input.Update(msg)
+				return s, cmd
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -83,7 +181,9 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.height = msg.Height
 	}
 
-	s.input, cmd = s.input.Update(msg)
+	if s.step == stepAPIKey {
+		s.input, cmd = s.input.Update(msg)
+	}
 	return s, cmd
 }
 
@@ -116,12 +216,41 @@ func (s *SetupWizard) View() string {
 	b.WriteString(titleStyle.Render("connect"))
 	b.WriteString("\n\n")
 
-	b.WriteString(subtitleStyle.Render("enter your api key (MINIMAX_API_KEY)"))
-	b.WriteString("\n\n")
-
-	// Input box
-	b.WriteString(inputBoxStyle.Render(s.input.View()))
-	b.WriteString("\n\n")
+	switch s.step {
+	case stepProvider:
+		b.WriteString(subtitleStyle.Render("step 1/3: choose provider"))
+		b.WriteString("\n\n")
+		for i, p := range s.providers {
+			prefix := "  "
+			if i == s.providerIndex {
+				prefix = "❯ "
+			}
+			b.WriteString(prefix + p + "\n")
+		}
+		b.WriteString("\n")
+	case stepAuthMethod:
+		b.WriteString(subtitleStyle.Render("step 2/3: z.ai auth mode"))
+		b.WriteString("\n\n")
+		for i, p := range s.authModes {
+			prefix := "  "
+			if i == s.authModeIndex {
+				prefix = "❯ "
+			}
+			b.WriteString(prefix + p + "\n")
+		}
+		b.WriteString("\n")
+		if s.selectedAuthMode() == authCodingPlan {
+			b.WriteString(hintStyle.Render("docs index: https://docs.z.ai/llms.txt"))
+			b.WriteString("\n")
+			b.WriteString(hintStyle.Render("coding plan base url: https://api.z.ai/api/coding/paas/v4"))
+			b.WriteString("\n\n")
+		}
+	case stepAPIKey:
+		b.WriteString(subtitleStyle.Render("step 3/3: enter EAI_API_KEY"))
+		b.WriteString("\n\n")
+		b.WriteString(inputBoxStyle.Render(s.input.View()))
+		b.WriteString("\n\n")
+	}
 
 	// Error message
 	if s.statusMsg != "" {
@@ -129,7 +258,7 @@ func (s *SetupWizard) View() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(hintStyle.Render("enter to save • esc to cancel"))
+	b.WriteString(hintStyle.Render("↑/↓ choose • enter next/save • esc back/cancel"))
 
 	return b.String()
 }
@@ -144,4 +273,28 @@ func (s *SetupWizard) Saved() bool {
 
 func (s *SetupWizard) GetConfig() app.Config {
 	return *s.cfg
+}
+
+func (s *SetupWizard) Summary() string {
+	if s.selectedProvider() == providerZAI {
+		if s.selectedAuthMode() == authCodingPlan {
+			return "connected: z.ai (Coding Plan)"
+		}
+		return "connected: z.ai (API Key)"
+	}
+	return "connected: MiniMax"
+}
+
+func (s *SetupWizard) selectedProvider() string {
+	if s.providerIndex < 0 || s.providerIndex >= len(s.providers) {
+		return providerZAI
+	}
+	return s.providers[s.providerIndex]
+}
+
+func (s *SetupWizard) selectedAuthMode() string {
+	if s.authModeIndex < 0 || s.authModeIndex >= len(s.authModes) {
+		return authCodingPlan
+	}
+	return s.authModes[s.authModeIndex]
 }

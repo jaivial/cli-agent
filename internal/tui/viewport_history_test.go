@@ -87,3 +87,30 @@ func TestPlanModeReasoningProgressIsSuppressed(t *testing.T) {
 		}
 	}
 }
+
+func TestModelPickerCommandAndSelection(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+	m = applyWindowSize(t, m)
+
+	m = sendEnter(t, m, "/model")
+	if !m.modelPickerActive {
+		t.Fatalf("expected model picker to open after /model")
+	}
+	if m.modelPickerIndex != 0 {
+		t.Fatalf("expected default picker index 0, got %d", m.modelPickerIndex)
+	}
+
+	m = pressKey(t, m, tea.KeyDown)
+	if m.modelPickerIndex != 1 {
+		t.Fatalf("expected picker index 1 after down, got %d", m.modelPickerIndex)
+	}
+
+	m = pressKey(t, m, tea.KeyEnter)
+	if m.modelPickerActive {
+		t.Fatalf("expected model picker to close after selecting")
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.Content != "model set to glm-5" {
+		t.Fatalf("unexpected final message: %q", last.Content)
+	}
+}

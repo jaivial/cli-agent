@@ -31,7 +31,7 @@ class CLIAgentAdapter(BaseAgent):
     3. Verify task completion automatically
     
     Usage:
-        harbor run -d terminal-bench@2.0 -a /path/to/harbor_adapter.py:CLIAgentAdapter --model minimax/MiniMax-M2.1
+        harbor run -d terminal-bench@2.0 -a /path/to/harbor_adapter.py:CLIAgentAdapter --model eai/glm-4.7
     """
     
     SUPPORTS_ATIF = False
@@ -70,16 +70,16 @@ class CLIAgentAdapter(BaseAgent):
         
         # Set environment variables
         if self.mock_mode:
-            os.environ["MINIMAX_API_KEY"] = "mock"
-        elif "MINIMAX_API_KEY" not in os.environ:
+            os.environ["EAI_API_KEY"] = "mock"
+        elif "EAI_API_KEY" not in os.environ:
             # Try to load from config
             config_path = Path("/Users/usuario/Desktop/cli-agent/.eai_config")
             if config_path.exists():
                 import yaml
                 with open(config_path) as f:
                     config = yaml.safe_load(f)
-                    if config and "minimax_api_key" in config:
-                        os.environ["MINIMAX_API_KEY"] = config["minimax_api_key"]
+                    if config and "api_key" in config:
+                        os.environ["EAI_API_KEY"] = config["api_key"]
         
         self.logger.info("CLI agent setup complete")
         

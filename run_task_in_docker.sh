@@ -34,10 +34,10 @@ if [ -f "$DOCKERFILE" ]; then
         -v "${EAI_BINARY}:/usr/local/bin/eai" \
         -v "${TASK_DIR}:/workspace" \
         -w /workspace \
-        -e MINIMAX_API_KEY="$MINIMAX_API_KEY" \
+        -e EAI_API_KEY="$EAI_API_KEY" \
         "$IMAGE_NAME" \
         sh -c "eai agent --max-loops 5 '$INSTRUCTION'"
 else
     echo "No Dockerfile found, running without Docker"
-    MINIMAX_API_KEY="$MINIMAX_API_KEY" "$EAI_BINARY" agent --max-loops 5 "$INSTRUCTION"
+    EAI_API_KEY="$EAI_API_KEY" "$EAI_BINARY" agent --max-loops 5 "$INSTRUCTION"
 fi

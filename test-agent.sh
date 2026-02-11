@@ -70,7 +70,7 @@ echo ""
 run_test "Help command" "bin/eai agent --help" "pass"
 
 # Test 3: Missing API key
-run_test "Missing API key handling" "bin/eai agent --task 'test' 2>&1 | grep -q 'MINIMAX_API_KEY'" "pass"
+run_test "Missing API key handling" "bin/eai agent --task 'test' 2>&1 | grep -q 'EAI_API_KEY'" "pass"
 
 # Test 4: Tool definitions exist
 run_test "Tool definitions" "grep -q 'DefaultTools' internal/app/agent.go" "pass"

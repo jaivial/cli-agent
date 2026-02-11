@@ -10,7 +10,7 @@ Version: Current Build
 ✓ Command responds to --help and --mode flags
 
 === Test 2: API Communication ===
-Note: API communication test skipped because MINIMAX_API_KEY is not configured in the test environment.
+Note: API communication test skipped because EAI_API_KEY is not configured in the test environment.
 The application will handle API key missing gracefully and show an error message in the TUI.
 
 === Test 3: Markdown Rendering ===
@@ -52,9 +52,9 @@ The CLI agent is functioning correctly with all core features:
 5. **Error Handling**: Gracefully handles missing API keys
 
 === Known Limitations ===
-- API communication not tested (requires MINIMAX_API_KEY configuration)
+- API communication not tested (requires EAI_API_KEY configuration)
 - Full TUI interaction testing would require manual verification due to interactive nature
 
 === Recommendations ===
-1. Configure MINIMAX_API_KEY environment variable for full API communication testing
+1. Configure EAI_API_KEY environment variable for full API communication testing
 2. Perform manual TUI testing for complete verification of interactive features

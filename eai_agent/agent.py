@@ -22,7 +22,7 @@ def load_api_key() -> str:
     hardcoded paths.
     """
 
-    return os.environ.get("MINIMAX_API_KEY", "")
+    return os.environ.get("EAI_API_KEY", "")
 
 
 def load_int_env(name: str) -> int | None:
@@ -80,9 +80,9 @@ class EaiAgent(BaseAgent):
         super().__init__(logs_dir=logs_dir, model_name=model_name, logger=logger, **kwargs)
         self.max_loops = max_loops
         self.api_key = load_api_key()
-        self.base_url = (base_url or os.environ.get("MINIMAX_BASE_URL", "")).strip()
-        self.model = (model or os.environ.get("MINIMAX_MODEL", "")).strip()
-        self.max_tokens = max_tokens if max_tokens is not None else load_int_env("MINIMAX_MAX_TOKENS")
+        self.base_url = (base_url or os.environ.get("EAI_BASE_URL", "")).strip()
+        self.model = (model or os.environ.get("EAI_MODEL", "")).strip()
+        self.max_tokens = max_tokens if max_tokens is not None else load_int_env("EAI_MAX_TOKENS")
         self.eai_binary_path = resolve_eai_binary_path()
 
     @staticmethod
@@ -173,7 +173,7 @@ dependencies = []
         """Run the eai agent in the environment."""
 
         if not self.api_key:
-            raise RuntimeError("MINIMAX_API_KEY is not set in the host environment")
+            raise RuntimeError("EAI_API_KEY is not set in the host environment")
 
         # Make cached task tests available to the agent. Harbor's terminal-bench
         # images typically do not include /tests during agent execution, but
@@ -214,16 +214,16 @@ dependencies = []
             self.logger.warning(f"Failed to preload /tests for agent: {e}")
 
         env = {
-            "MINIMAX_API_KEY": self.api_key,
+            "EAI_API_KEY": self.api_key,
             "EAI_SKIP_TLS_VERIFY": "1",
             "EAI_TBENCH_FASTPATH": "1",
         }
         if self.base_url:
-            env["MINIMAX_BASE_URL"] = self.base_url
+            env["EAI_BASE_URL"] = self.base_url
         if self.model:
-            env["MINIMAX_MODEL"] = self.model
+            env["EAI_MODEL"] = self.model
         if self.max_tokens:
-            env["MINIMAX_MAX_TOKENS"] = str(self.max_tokens)
+            env["EAI_MAX_TOKENS"] = str(self.max_tokens)
 
         escaped_instruction = shlex.quote(instruction)
         # IMPORTANT: Many terminal-bench instructions start with a leading "-"

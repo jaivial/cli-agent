@@ -35,7 +35,7 @@ func NewOrchestrator(client *MinimaxClient, maxParallel int) *Orchestrator {
 
 func (o *Orchestrator) Run(ctx context.Context, shards []TaskShard) ([]TaskResult, error) {
 	if o.Client == nil {
-		return nil, errors.New("minimax client is required")
+		return nil, errors.New("client is required")
 	}
 	if len(shards) == 0 {
 		return nil, nil

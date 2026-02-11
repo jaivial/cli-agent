@@ -52,10 +52,10 @@ init() {
     
     mkdir -p "$TEMP_DIR"
     
-    # Check for MINIMAX_API_KEY
-    if [ -z "$MINIMAX_API_KEY" ]; then
-        log WARN "MINIMAX_API_KEY not set. API calls will fail."
-        log WARN "Set it with: export MINIMAX_API_KEY='your-key'"
+    # Check for EAI_API_KEY
+    if [ -z "$EAI_API_KEY" ]; then
+        log WARN "EAI_API_KEY not set. API calls will fail."
+        log WARN "Set it with: export EAI_API_KEY='your-key'"
     fi
     
     log INFO "Initialized Ralph Loop"
@@ -346,7 +346,7 @@ generate_report() {
 
 ### Next Steps
 
-1. **Streaming Support** - Add SSE support to MiniMax client
+1. **Streaming Support** - Add SSE support to Z.AI client
 2. **PTY Integration** - Add interactive command support
 3. **Error Handling** - Implement retry logic
 4. **Benchmark** - Add telemetry for 70% target

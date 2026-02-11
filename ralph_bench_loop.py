@@ -111,8 +111,8 @@ def analyze_failures(results: dict) -> list[str]:
         
         # Suggest improvements based on patterns
         if status == "error":
-            if "MINIMAX_API_KEY" in str(task):
-                suggestions.append("Configure MINIMAX_API_KEY environment variable")
+            if "EAI_API_KEY" in str(task):
+                suggestions.append("Configure EAI_API_KEY environment variable")
             else:
                 suggestions.append("Fix agent error handling and error messages")
         elif status == "timeout":
@@ -132,9 +132,9 @@ def implement_improvement(improvement: str) -> bool:
     
     improvement = improvement.lower()
     
-    if "minimax_api_key" in improvement:
-        log("WARN", "Please set MINIMAX_API_KEY in your environment")
-        log("INFO", "  export MINIMAX_API_KEY='your-api-key'")
+    if "api_key" in improvement:
+        log("WARN", "Please set EAI_API_KEY in your environment")
+        log("INFO", "  export EAI_API_KEY='your-api-key'")
         return False  # Can't auto-fix this
     
     elif "error handling" in improvement or "error messages" in improvement:

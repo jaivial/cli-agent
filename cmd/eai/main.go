@@ -25,6 +25,25 @@ const (
 	repoURL = "https://github.com/jaivial/cli-agent"
 )
 
+func applyEnvOverrides(cfg *app.Config) {
+	if v := strings.TrimSpace(os.Getenv("EAI_API_KEY")); v != "" {
+		cfg.APIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EAI_BASE_URL")); v != "" {
+		cfg.BaseURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EAI_MODEL")); v != "" {
+		cfg.Model = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EAI_MAX_TOKENS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxTokens = n
+		}
+	}
+	cfg.Model = app.NormalizeModel(cfg.Model)
+	cfg.BaseURL = app.NormalizeBaseURL(cfg.BaseURL)
+}
+
 func getBinaryPath() string {
 	exe, _ := os.Executable()
 	return exe
@@ -80,8 +99,8 @@ func generateCompletion(shell string) error {
 func main() {
 	root := &cobra.Command{
 		Use:     "eai",
-		Short:   "EAI - CLI Agent with MiniMax API",
-		Long:    "EAI is an interactive CLI agent powered by MiniMax API.\n\nUse without arguments for TUI mode, or with the 'agent' subcommand for automated task execution.\n\nFor more information, visit: " + repoURL,
+		Short:   "EAI - CLI agent powered by Z.AI",
+		Long:    "EAI is an interactive CLI agent powered by Z.AI models.\n\nUse without arguments for TUI mode, or with the 'agent' subcommand for automated task execution.\n\nFor more information, visit: " + repoURL,
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if v, _ := cmd.Flags().GetBool("version"); v {
@@ -100,21 +119,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			// Env overrides (take precedence over config defaults).
-			if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
-				cfg.MinimaxAPIKey = v
-			}
-			if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
-				cfg.BaseURL = v
-			}
-			if v := os.Getenv("MINIMAX_MODEL"); v != "" {
-				cfg.Model = v
-			}
-			if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
-				if n, err := strconv.Atoi(v); err == nil && n > 0 {
-					cfg.MaxTokens = n
-				}
-			}
+			applyEnvOverrides(&cfg)
 
 			mockMode, _ := cmd.Flags().GetBool("mock")
 			application, err := app.NewApplication(cfg, mockMode)
@@ -224,8 +229,8 @@ func main() {
 
 	agentCmd := &cobra.Command{
 		Use:   "agent [task]",
-		Short: "Run the CLI agent with MiniMax API",
-		Long:  "Run an iterative CLI agent that uses MiniMax API to accomplish tasks.\n\nExamples:\n  - eai agent\n  - eai agent \"List Go files\"\n  - eai agent --max-loops 20 \"Analyze\"\n  - eai agent --mock \"List files\"",
+		Short: "Run the CLI agent with Z.AI",
+		Long:  "Run an iterative CLI agent that uses Z.AI to accomplish tasks.\n\nExamples:\n  - eai agent\n  - eai agent \"List Go files\"\n  - eai agent --max-loops 20 \"Analyze\"\n  - eai agent --mock \"List files\"",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -245,26 +250,12 @@ func main() {
 			}
 
 			if agentMock {
-				cfg.MinimaxAPIKey = "mock"
+				cfg.APIKey = "mock"
 				cfg.Model = "mock"
 			} else {
-				// Env overrides (take precedence over config defaults).
-				if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
-					cfg.MinimaxAPIKey = v
-				}
-				if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
-					cfg.BaseURL = v
-				}
-				if v := os.Getenv("MINIMAX_MODEL"); v != "" {
-					cfg.Model = v
-				}
-				if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
-					if n, err := strconv.Atoi(v); err == nil && n > 0 {
-						cfg.MaxTokens = n
-					}
-				}
-				if cfg.MinimaxAPIKey == "" {
-					return fmt.Errorf("MINIMAX_API_KEY not set. Please set it in config or environment")
+				applyEnvOverrides(&cfg)
+				if cfg.APIKey == "" {
+					return fmt.Errorf("EAI_API_KEY not set. Please set it in config or environment")
 				}
 			}
 
@@ -329,7 +320,7 @@ func main() {
 
 	agentCmd.Flags().IntVarP(&agentMaxLoops, "max-loops", "l", 30, "Maximum number of agent iterations")
 	agentCmd.Flags().StringVarP(&agentTask, "task", "t", "", "Task to execute (non-interactive)")
-	agentCmd.Flags().BoolVarP(&agentMock, "mock", "m", false, "Use mock MiniMax client for testing")
+	agentCmd.Flags().BoolVarP(&agentMock, "mock", "m", false, "Use mock Z.AI client for testing")
 
 	root.AddCommand(agentCmd)
 
@@ -353,21 +344,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			// Env overrides (take precedence over config defaults).
-			if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
-				cfg.MinimaxAPIKey = v
-			}
-			if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
-				cfg.BaseURL = v
-			}
-			if v := os.Getenv("MINIMAX_MODEL"); v != "" {
-				cfg.Model = v
-			}
-			if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
-				if n, err := strconv.Atoi(v); err == nil && n > 0 {
-					cfg.MaxTokens = n
-				}
-			}
+			applyEnvOverrides(&cfg)
 
 			mockMode, _ := cmd.Flags().GetBool("mock")
 			application, err := app.NewApplication(cfg, mockMode)

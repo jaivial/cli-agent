@@ -83,7 +83,7 @@ class TerminalBench2Harness:
                 timeout=timeout_sec,
                 env={
                     **os.environ,
-                    "MINIMAX_API_KEY": os.environ.get("MINIMAX_API_KEY", "")
+                    "EAI_API_KEY": os.environ.get("EAI_API_KEY", "")
                 }
             )
             

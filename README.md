@@ -1,6 +1,6 @@
 # CLI Agent (eai)
 
-Un agente CLI moderno con interfaz TUI mejorado, potenciado por MiniMax API.
+Un agente CLI moderno con interfaz TUI mejorado, potenciado por Z.AI.
 
 ## ✨ Características
 
@@ -32,6 +32,20 @@ cd cli-agent
 # Compilar e instalar
 go build -o /usr/local/bin/eai ./cmd/eai/
 chmod +x /usr/local/bin/eai
+```
+
+### Opción 3: Fedora (primera instalación)
+
+```bash
+git clone https://github.com/jaivial/cli-agent.git
+cd cli-agent
+./install_fedora.sh
+```
+
+Instalación global en `/usr/local/bin`:
+
+```bash
+./install_fedora.sh --system
 ```
 
 ## 📖 Uso
@@ -72,18 +86,18 @@ eai agent --mock "List files"  # Sin API key real
 
 ## ⚙️ Configuración
 
-### API Key de MiniMax
+### API key
 
 Establece tu API key como variable de entorno:
 
 ```bash
-export MINIMAX_API_KEY="tu-api-key-aqui"
+export EAI_API_KEY="tu-api-key-aqui"
 ```
 
 Añádelo a tu shell profile para persistir:
 
 ```bash
-echo 'export MINIMAX_API_KEY="tu-api-key-aqui"' >> ~/.bashrc
+echo 'export EAI_API_KEY="tu-api-key-aqui"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -92,8 +106,9 @@ source ~/.bashrc
 Crea `~/.config/cli-agent/config.yml`:
 
 ```yaml
-minimax_api_key: "tu-api-key"
-model: "minimax-m2.1"
+api_key: "tu-api-key"
+base_url: "https://api.z.ai/api/paas/v4/chat/completions"
+model: "glm-4.7"
 default_mode: "plan"
 max_tokens: 4096
 ```
@@ -140,10 +155,10 @@ python3 terminal_bench_harness.py ./bin/eai
 
 ### Terminal-Bench 2.0 (Harbor, oficial)
 
-Requiere `harbor` y una API key real en `MINIMAX_API_KEY`.
+Requiere `harbor` y una API key real en `EAI_API_KEY`.
 
 ```bash
-export MINIMAX_API_KEY="tu-api-key-aqui"
+export EAI_API_KEY="tu-api-key-aqui"
 go build -o eai ./cmd/eai
 harbor jobs start -c tbench2_first5.harbor.yaml
 ```
@@ -167,6 +182,7 @@ cli-agent/
 │   └── tui/           # Interfaz de usuario
 ├── bin/               # Binarios compilados
 ├── install.sh         # Script de instalación
+├── install_fedora.sh  # Script de instalación para Fedora
 └── terminal_bench_harness.py  # Benchmark
 ```
 
@@ -185,7 +201,7 @@ MIT License -feel free to use and modify.
 ## 🙏 Agradecimientos
 
 - [Charmbracelet](https://charm.sh/) por bubbletea y lipgloss
-- [MiniMax](https://minimax.io/) por la API de IA
+- [Z.AI](https://docs.z.ai/) por la API de IA
 
 ---
 

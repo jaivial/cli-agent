@@ -69,7 +69,7 @@ cd ~/Desktop/cli-agent
 
 ### From Project Directory
 ```bash
-export MINIMAX_API_KEY="your-key-here"
+export EAI_API_KEY="your-key-here"
 eai agent "Find all TODO comments and summarize them"
 ```
 
@@ -136,16 +136,16 @@ cli-agent/
 
 ### Environment Variables
 ```bash
-export MINIMAX_API_KEY="your-api-key"
-export MINIMAX_BASE_URL="https://api.minimax.io/anthropic/v1/messages"
+export EAI_API_KEY="your-api-key"
+export EAI_BASE_URL="https://api.z.ai/api/paas/v4"
 ```
 
 ### Config File (Optional)
 ```yaml
 # ~/.config/cli-agent/config.yml
-minimax_api_key: "your-api-key"
-base_url: "https://api.minimax.io/anthropic/v1/messages"
-model: "minimax-m2.1"
+eai_api_key: "your-api-key"
+base_url: "https://api.z.ai/api/paas/v4"
+model: "glm-4.7"
 max_tokens: 2048
 max_parallel_agents: 50
 default_mode: "plan"
@@ -177,7 +177,7 @@ bash ralph-loop.sh
 ./bin/eai agent "test task"  # Without API key
 
 # Test with API key
-export MINIMAX_API_KEY="your-key"
+export EAI_API_KEY="your-key"
 ./bin/eai agent "List files in current directory"
 ```
 

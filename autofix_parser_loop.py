@@ -12,15 +12,15 @@ import json
 import time
 
 AGENT_PATH = os.environ.get("AGENT_PATH", os.path.dirname(os.path.abspath(__file__)))
-API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+API_KEY = os.environ.get("EAI_API_KEY", "")
 if not API_KEY:
-    raise SystemExit("MINIMAX_API_KEY is not set")
+    raise SystemExit("EAI_API_KEY is not set")
 AGENT_GO = f"{AGENT_PATH}/internal/app/agent.go"
 
 def run_parser_test():
     """Run parser test and get output."""
     result = subprocess.run(
-        f"cd {AGENT_PATH} && export MINIMAX_API_KEY='{API_KEY}' && timeout 180 python3 parser_test_loop.py 2>&1",
+        f"cd {AGENT_PATH} && export EAI_API_KEY='{API_KEY}' && timeout 180 python3 parser_test_loop.py 2>&1",
         shell=True,
         capture_output=True,
         timeout=200
@@ -175,7 +175,7 @@ def main():
         if fixes_this_round == 0 and rate < 100:
             print("  - No automatic fixes - trying KiloCode...")
             result = subprocess.run(
-                f"cd {AGENT_PATH} && kilocode --auto --yolo --nosplash 'Fix parseToolCalls() to handle all MiniMax API formats. The API returns inconsistent formats. Make parser handle ALL cases. Test until 100% success.' 2>&1",
+                f"cd {AGENT_PATH} && kilocode --auto --yolo --nosplash 'Fix parseToolCalls() to handle all Z.AI API formats. The API returns inconsistent formats. Make parser handle ALL cases. Test until 100% success.' 2>&1",
                 shell=True,
                 timeout=180
             )
