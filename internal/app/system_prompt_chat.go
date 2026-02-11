@@ -23,9 +23,9 @@ func GetChatSystemPrompt(mode Mode, workDir string, verbosity string) string {
 	var modeHint string
 	switch mode {
 	case ModePlan:
-		modeHint = "Planning mode: ask 1-3 clarifying questions if requirements are missing; otherwise give a compact plan (3-7 bullets). Avoid big templates unless explicitly requested."
+		modeHint = "Plan mode: ground your answer in the repo context provided. Prefer discovering facts over guessing. Produce a decision-complete plan (title, assumptions, steps, verification)."
 	case ModeCreate:
-		modeHint = "Create mode: be direct and concrete. Prefer a short checklist or a single recommended approach. Only include large code/templates if the user asks."
+		modeHint = "Create mode: execute end-to-end. Prefer sensible defaults over questions; call out assumptions briefly. Keep output direct and verifiable."
 	case ModeCode:
 		modeHint = "Code mode: focus on specific code changes and exact commands. Keep explanations minimal."
 	case ModeDo:

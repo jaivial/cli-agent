@@ -19,8 +19,8 @@ func TestBuildPlanDisplayIfApplicable_FromProposedPlanBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected plan to be detected")
 	}
-	if !strings.Contains(display, "plan") {
-		t.Fatalf("expected display to include a plan lead, got: %q", display)
+	if !strings.Contains(display, "Improve Plan UX") {
+		t.Fatalf("expected display to include title, got: %q", display)
 	}
 	if !strings.Contains(display, "[ ] Add plan card renderer") {
 		t.Fatalf("expected checklist entry in display, got: %q", display)
@@ -28,8 +28,8 @@ func TestBuildPlanDisplayIfApplicable_FromProposedPlanBlock(t *testing.T) {
 	if strings.Contains(display, "**") {
 		t.Fatalf("expected markdown emphasis removed, got: %q", display)
 	}
-	if !strings.Contains(planText, "[ ] Add yes/no prompt") {
-		t.Fatalf("expected plan text checklist, got: %q", planText)
+	if !strings.Contains(planText, "- Add yes/no prompt") {
+		t.Fatalf("expected plan text to carry full plan body, got: %q", planText)
 	}
 }
 

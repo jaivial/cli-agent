@@ -813,6 +813,41 @@ func TestExecuteTool_PatchFile(t *testing.T) {
 	}
 }
 
+func TestExecuteTool_PatchFile_PreservesFileMode(t *testing.T) {
+	l := createTestAgentLoop()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "script.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatalf("failed to setup file: %v", err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("failed to chmod test file: %v", err)
+	}
+
+	patch := "@@ -1,2 +1,2 @@\n #!/bin/sh\n-echo hi\n+echo hello\n"
+	call := ToolCall{
+		ID:   "patch_mode_1",
+		Name: "patch_file",
+		Arguments: mustMarshalJSON(map[string]interface{}{
+			"path":  path,
+			"patch": patch,
+		}),
+	}
+
+	result := l.executeTool(createTestContext(), call)
+	if !result.Success {
+		t.Fatalf("expected patch_file success, got error: %s", result.Error)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat patched file: %v", err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("expected mode 0755 after patch, got %o", info.Mode().Perm())
+	}
+}
+
 func TestExecuteTool_AppendFile(t *testing.T) {
 	l := createTestAgentLoop()
 	tmpDir := t.TempDir()

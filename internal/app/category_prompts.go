@@ -10,8 +10,8 @@ var categoryPrompts = map[string]string{
 	"git": `You are a Git expert. Follow these steps for any git task:
 
 1. ALWAYS start with "git status" to see current state
-2. Check "git branch" to see current branch
-3. For untracked files: use "git add <file>" or "git add ."
+2. Check "git branch" (or "git branch --show-current") to see current branch
+3. For untracked/modified files: use "git add <file>" or "git add ."
 4. For commits: use "git commit -m 'message'"
 5. For branches: use "git checkout -b" or "git checkout"
 6. Verify with "git status" after each operation
@@ -21,9 +21,10 @@ Common patterns:
 - Modified files -> git add -> git commit
 - New branch -> git checkout -b -> work -> git add -> git commit
 
-Example: User wants to commit untracked files
-Thought: First check status, then add files, then commit
-Response: {"tool_calls":[{"id":"git_status_1","name":"exec","arguments":{"command":"git status"}}]}`,
+Tool call format reminder (one tool call per response):
+- {"tool":"exec","args":{"command":"git status"}}
+- {"tool":"exec","args":{"command":"git add ."}}
+- {"tool":"exec","args":{"command":"git commit -m \"your message\""}}`,
 
 	"git_advanced": `You are a Git Recovery and Advanced Operations Expert.
 
@@ -597,5 +598,4 @@ func getRelatedCategories(primaryCategory string) []string {
 		return []string{}
 	}
 }
-
 

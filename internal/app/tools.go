@@ -399,26 +399,28 @@ func executePatchFileTool(ctx context.Context, args json.RawMessage, l *AgentLoo
 		return result
 	}
 
-	// Create a temporary file for the patch
-	tmpDir := os.TempDir()
-	patchFile := filepath.Join(tmpDir, fmt.Sprintf("patch_%d.patch", time.Now().UnixNano()))
-	if err := os.WriteFile(patchFile, []byte(patchArgs.Patch), 0644); err != nil {
-		result.Error = fmt.Sprintf("Failed to write patch file: %v", err)
+	data, err := os.ReadFile(patchArgs.Path)
+	if err != nil {
+		result.Error = fmt.Sprintf("Failed to read file: %v", err)
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
 	}
-	defer os.Remove(patchFile)
 
-	// Apply the patch using the patch command
-	cmd := exec.CommandContext(ctx, "patch", "-p0", "-i", patchFile, patchArgs.Path)
-	output, err := cmd.CombinedOutput()
+	updated, err := ApplyUnifiedPatch(string(data), patchArgs.Patch)
 	if err != nil {
-		result.Error = fmt.Sprintf("Patch failed: %v\nOutput: %s", err, string(output))
-	} else {
-		result.Output = fmt.Sprintf("File patched: %s\nOutput: %s", patchArgs.Path, string(output))
-		result.Success = true
+		result.Error = fmt.Sprintf("Patch failed: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
 	}
 
+	if err := writeFilePreserveMode(patchArgs.Path, []byte(updated)); err != nil {
+		result.Error = fmt.Sprintf("Failed to write patched file: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	result.Output = fmt.Sprintf("File patched: %s", patchArgs.Path)
+	result.Success = true
 	result.DurationMs = time.Since(start).Milliseconds()
 	return result
 }

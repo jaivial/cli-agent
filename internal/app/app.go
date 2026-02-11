@@ -552,6 +552,23 @@ func isGenericCompletionText(s string) bool {
 	return false
 }
 
+func stripTaskCompletedSentinel(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for len(lines) > 0 {
+		last := strings.TrimSpace(lines[len(lines)-1])
+		if strings.EqualFold(last, "TASK_COMPLETED") {
+			lines = lines[:len(lines)-1]
+			continue
+		}
+		break
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
 func renderAgentStateForChat(state *AgentState) string {
 	if state == nil {
 		return "error: no agent state"
@@ -576,6 +593,8 @@ func renderAgentStateForChat(state *AgentState) string {
 			ops = append(ops, fileOp{verb: "Updated", path: strings.TrimSpace(out[len("File edited:"):])})
 		case strings.HasPrefix(outLower, "file appended:"):
 			ops = append(ops, fileOp{verb: "Updated", path: strings.TrimSpace(out[len("File appended:"):])})
+		case strings.HasPrefix(outLower, "file patched:"):
+			ops = append(ops, fileOp{verb: "Updated", path: strings.TrimSpace(out[len("File patched:"):])})
 		}
 	}
 	if len(ops) > 0 {
@@ -600,6 +619,24 @@ func renderAgentStateForChat(state *AgentState) string {
 			seen[key] = true
 			lines = append(lines, fmt.Sprintf("%s %s:1", op.verb, p))
 		}
+		final := stripTaskCompletedSentinel(state.FinalOutput)
+		final = strings.TrimSpace(final)
+		finalLower := strings.ToLower(final)
+		if final != "" && !isGenericCompletionText(final) && !strings.Contains(finalLower, "did not complete within") && !strings.Contains(finalLower, "did not return any tool calls") {
+			// Prefer the model's final report when provided, but append clickable file refs.
+			var b strings.Builder
+			b.WriteString(final)
+			if len(lines) > 0 {
+				b.WriteString("\n\nWhat I updated:\n")
+				for _, line := range lines {
+					b.WriteString("- ")
+					b.WriteString(line)
+					b.WriteString("\n")
+				}
+			}
+			return strings.TrimSpace(b.String())
+		}
+
 		if len(lines) > 0 {
 			var b strings.Builder
 			b.WriteString("Done. I finished the requested changes.\n\n")
@@ -624,7 +661,8 @@ func renderAgentStateForChat(state *AgentState) string {
 
 	// Fall back to a concise status message.
 	if state.FinalOutput != "" && strings.TrimSpace(state.FinalOutput) != "" {
-		final := strings.TrimSpace(state.FinalOutput)
+		final := stripTaskCompletedSentinel(state.FinalOutput)
+		final = strings.TrimSpace(final)
 		lower := strings.ToLower(final)
 		if strings.Contains(lower, "did not complete within") {
 			return "I wasn't able to fully complete the task within the current step limit. I can continue from the current state if you want."

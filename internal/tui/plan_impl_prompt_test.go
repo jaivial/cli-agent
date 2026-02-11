@@ -17,8 +17,8 @@ func TestBuildPlanImplementationPrompt_IncludesPlanContextAndChecklist(t *testin
 	if !strings.Contains(out, "/home/jaime/Desktop/eai/index.html") {
 		t.Fatalf("expected prompt to include target path, got: %q", out)
 	}
-	if !strings.Contains(out, "Approved plan checklist:") {
-		t.Fatalf("expected prompt to include checklist header, got: %q", out)
+	if !strings.Contains(out, "Approved plan (verbatim):") {
+		t.Fatalf("expected prompt to include approved plan header, got: %q", out)
 	}
 	if !strings.Contains(out, "Verify all images load") {
 		t.Fatalf("expected prompt to include checklist content, got: %q", out)
@@ -27,4 +27,3 @@ func TestBuildPlanImplementationPrompt_IncludesPlanContextAndChecklist(t *testin
 		t.Fatalf("did not expect repository-scoping language, got: %q", out)
 	}
 }
-

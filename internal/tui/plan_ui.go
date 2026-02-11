@@ -14,7 +14,7 @@ var (
 	proposedPlanBlockRe = regexp.MustCompile(`(?is)<proposed_plan>\s*(.*?)\s*</proposed_plan>`)
 	planHeadingRe       = regexp.MustCompile(`^\s{0,3}#{1,6}\s+`)
 	planListItemRe      = regexp.MustCompile(`^\s*(?:[-*+]|(?:\d+[.)]))\s+(.+)$`)
-	planCheckboxRe      = regexp.MustCompile(`^\s*\[(?: |x|X)\]\s+(.+)$`)
+	planCheckboxRe      = regexp.MustCompile(`^\s*(?:[-*+]\s*)?\[(?: |x|X)\]\s+(.+)$`)
 )
 
 const (
@@ -61,7 +61,7 @@ func (m *MainModel) renderPlanDecision() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Implement this plan?"))
 	b.WriteString("\n")
-	b.WriteString(row(planDecisionYes, "1. Yes, implement this plan  Switch to Default and start coding."))
+	b.WriteString(row(planDecisionYes, "1. Yes, implement this plan  Switch to Create and start coding."))
 	b.WriteString("\n")
 	b.WriteString(row(planDecisionNo, "2. No, stay in Plan mode     Continue planning with the model."))
 	b.WriteString("\n")
@@ -84,24 +84,19 @@ func buildPlanDisplayIfApplicable(mode app.Mode, raw string) (display string, pl
 	if !found {
 		return "", "", false
 	}
-	title, checklist := normalizePlanBody(planBody)
+	displayLines, checklist := normalizePlanBody(planBody)
 	if len(checklist) == 0 {
 		return "", "", false
 	}
-	lead := choosePlanLead(planBody)
 
-	lines := make([]string, 0, len(checklist)+4)
-	lines = append(lines, lead)
-	if title != "" {
-		lines = append(lines, title)
+	display = strings.TrimSpace(strings.Join(displayLines, "\n"))
+	if display == "" {
+		return "", "", false
 	}
-	lines = append(lines, "")
-	lines = append(lines, checklist...)
-	planText = strings.Join(checklist, "\n")
-	if title != "" {
-		planText = title + "\n" + planText
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n")), strings.TrimSpace(planText), true
+
+	// Carry the full plan body forward for execution, not just extracted checklist lines.
+	planText = strings.TrimSpace(planBody)
+	return display, planText, true
 }
 
 func extractPlanBody(raw string) (string, bool) {
@@ -133,42 +128,121 @@ func extractPlanBody(raw string) (string, bool) {
 	return "", false
 }
 
-func normalizePlanBody(body string) (title string, checklist []string) {
+func normalizePlanBody(body string) (displayLines []string, checklist []string) {
 	lines := strings.Split(strings.TrimSpace(body), "\n")
 	checklist = make([]string, 0, len(lines))
 
+	type sectionKind string
+	const (
+		sectionUnknown      sectionKind = ""
+		sectionSummary      sectionKind = "summary"
+		sectionAssumptions  sectionKind = "assumptions"
+		sectionPlan         sectionKind = "plan"
+		sectionVerification sectionKind = "verification"
+	)
+	currentSection := sectionUnknown
+
+	isHeading := func(line string) bool {
+		return planHeadingRe.MatchString(line)
+	}
+	headingLevel := func(line string) int {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#") {
+			return 0
+		}
+		level := 0
+		for i := 0; i < len(line) && line[i] == '#'; i++ {
+			level++
+		}
+		if level > 6 {
+			level = 6
+		}
+		return level
+	}
+	headingText := func(line string) string {
+		return strings.ToLower(strings.TrimSpace(sanitizePlanLine(line)))
+	}
+
+	hasExplicitSections := false
 	for _, line := range lines {
-		raw := strings.TrimSpace(line)
-		if raw == "" {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
 			continue
 		}
-
-		if m := planCheckboxRe.FindStringSubmatch(raw); len(m) >= 2 {
-			item := sanitizePlanLine(m[1])
-			if item != "" {
-				checklist = append(checklist, "[ ] "+item)
-			}
-			continue
-		}
-
-		if m := planListItemRe.FindStringSubmatch(raw); len(m) >= 2 {
-			item := sanitizePlanLine(m[1])
-			if item != "" {
-				checklist = append(checklist, "[ ] "+item)
-			}
-			continue
-		}
-
-		clean := sanitizePlanLine(raw)
-		if clean == "" {
-			continue
-		}
-		if title == "" {
-			title = clean
+		if isHeading(trim) && headingLevel(trim) >= 2 {
+			hasExplicitSections = true
+			break
 		}
 	}
 
-	return strings.TrimSpace(title), checklist
+	for _, line := range lines {
+		raw := strings.TrimRight(line, " \t")
+		trim := strings.TrimSpace(raw)
+		if trim == "" {
+			// Preserve intentional blank lines for readability.
+			displayLines = append(displayLines, "")
+			continue
+		}
+
+		if isHeading(trim) {
+			level := headingLevel(trim)
+			h := headingText(trim)
+			if level >= 2 {
+				switch {
+				case strings.Contains(h, "summary"):
+					currentSection = sectionSummary
+				case strings.Contains(h, "assumption"):
+					currentSection = sectionAssumptions
+				case strings.Contains(h, "verification") || strings.Contains(h, "verify"):
+					currentSection = sectionVerification
+				case strings.Contains(h, "plan") || strings.Contains(h, "steps"):
+					currentSection = sectionPlan
+				default:
+					currentSection = sectionUnknown
+				}
+			}
+			displayLines = append(displayLines, sanitizePlanLine(trim))
+			continue
+		}
+
+		// Checkbox item (preferred)
+		if m := planCheckboxRe.FindStringSubmatch(trim); len(m) >= 2 {
+			item := sanitizePlanLine(m[1])
+			if item == "" {
+				continue
+			}
+			checklist = append(checklist, "- [ ] "+item)
+			displayLines = append(displayLines, "[ ] "+item)
+			continue
+		}
+
+		// Plain list item: render as bullet in Summary/Assumptions, checkbox in Plan/Verification.
+		if m := planListItemRe.FindStringSubmatch(trim); len(m) >= 2 {
+			item := sanitizePlanLine(m[1])
+			if item == "" {
+				continue
+			}
+			if !hasExplicitSections || currentSection == sectionPlan || currentSection == sectionVerification {
+				checklist = append(checklist, "- [ ] "+item)
+				displayLines = append(displayLines, "[ ] "+item)
+			} else {
+				displayLines = append(displayLines, "• "+item)
+			}
+			continue
+		}
+
+		// Plain line.
+		clean := sanitizePlanLine(trim)
+		if clean != "" {
+			displayLines = append(displayLines, clean)
+		}
+	}
+
+	// Require at least a couple actionable steps (checkboxes or inferred plan/verification items).
+	if len(checklist) == 0 {
+		return nil, nil
+	}
+	return displayLines, checklist
 }
 
 func sanitizePlanLine(line string) string {
@@ -189,23 +263,6 @@ func sanitizePlanLine(line string) string {
 	line = strings.TrimSpace(line)
 	line = strings.Join(strings.Fields(line), " ")
 	return strings.TrimSpace(line)
-}
-
-func choosePlanLead(seed string) string {
-	variants := []string{
-		"Plan ready. Here is what we should execute:",
-		"I drafted this plan:",
-		"Proposed implementation plan:",
-		"This is the plan to run:",
-	}
-	if len(variants) == 0 {
-		return "Plan:"
-	}
-	sum := 0
-	for _, r := range seed {
-		sum += int(r)
-	}
-	return variants[sum%len(variants)]
 }
 
 func renderPlanContent(content string, width int) string {
@@ -246,7 +303,7 @@ func buildPlanImplementationPrompt(planText string, planContext string) string {
 	planContext = strings.TrimSpace(planContext)
 
 	var b strings.Builder
-	b.WriteString("Implement the approved plan end-to-end. Follow the plan checklist as the source of truth and verify your changes.\n")
+	b.WriteString("Implement the approved plan end-to-end. Treat the approved plan as the source of truth and verify your changes.\n")
 	b.WriteString("CRITICAL: Preserve concrete facts discovered in Plan mode (paths, filenames, constraints). Do not restart discovery unless necessary.\n")
 	b.WriteString("If you use the `exec` tool, prefer setting its `cwd` to the target directory discovered in Plan mode instead of assuming the current working directory is correct.\n")
 
@@ -257,7 +314,7 @@ func buildPlanImplementationPrompt(planText string, planContext string) string {
 	}
 
 	if planText != "" {
-		b.WriteString("\nApproved plan checklist:\n\n")
+		b.WriteString("\nApproved plan (verbatim):\n\n")
 		b.WriteString(planText)
 		return strings.TrimSpace(b.String())
 	}

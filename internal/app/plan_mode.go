@@ -13,6 +13,7 @@ import (
 var (
 	proposedPlanBlockRE = regexp.MustCompile(`(?is)<proposed_plan>\s*(.*?)\s*</proposed_plan>`)
 	planNumberedLineRE  = regexp.MustCompile(`^\d+[.)]\s+`)
+	planCheckboxLineRE  = regexp.MustCompile(`(?i)^\s*(?:[-*+]\s*)?\[\s*(?: |x)\s*\]\s+(.+)$`)
 )
 
 func isMockClient(client *MinimaxClient) bool {
@@ -49,25 +50,35 @@ func GetPlanAgentSystemPrompt(workDir string) string {
 
 WORKDIR: %s
 
-CRITICAL MODE RULES:
-- This is planning-only mode. Do NOT modify files and do NOT run mutating commands.
-- You may gather context using read-only tools (list_dir, search_files, grep, read_file).
-- Do not ask the user to run shell commands for basic discovery; use tools directly.
-- Stop gathering once you have enough context for a concrete plan.
+MODE RULES (STRICT):
+- You are in Plan mode until the app changes modes. If the user asks to implement/execute, treat it as a request to plan the execution, not do it.
+- Plan mode is planning-only. Do NOT modify files and do NOT run mutating commands.
+- Ground the plan in the actual repo: use read-only tools (list_dir, search_files, grep, read_file) to discover facts before finalizing.
+- Prefer discovering "unknowns" from the repo over asking the user. Only ask when it is truly a preference/tradeoff not inferable from the codebase.
+- Stop exploring once you have enough context for a decision-complete plan.
 - WORKDIR is a default starting point, not a boundary. If the user request clearly points to files outside WORKDIR, inspect those exact paths.
 - Path tips:
   - You can use `+"`~`"+` (home) in tool paths (e.g., `+"`~/Desktop/eai`"+`).
   - If the user references common home folders (Desktop/Downloads/Documents/etc), prefer checking under home first (e.g., `+"`Desktop/eai`"+` or `+"`~/Desktop/eai`"+`).
 
+TWO KINDS OF UNKNOWNS (TREAT DIFFERENTLY):
+1) Discoverable facts (repo truth): explore first using tools.
+2) Preferences/tradeoffs (not discoverable): choose a sensible default, record it under "Assumptions", and proceed.
+
+FINAL PLAN FORMAT (REQUIRED):
+- Return exactly one <proposed_plan>...</proposed_plan> block and nothing else.
+- Inside the block, include (in order):
+  1) A short title (one line)
+  2) A brief Summary section (2-5 bullets)
+  3) An Assumptions section (bullets; include defaults you chose)
+  4) A Plan section with 6-12 checklist items formatted as: - [ ] ...
+  5) A Verification section with 2-5 checklist items formatted as: - [ ] ...
+- The plan must be decision-complete: the implementer should not have to make any decisions.
+
 RESPONSE RULES (STRICT):
 - Every response must be exactly ONE of:
   1) A single JSON tool call: {"tool":"...", "args":{...}}
   2) A final plan wrapped in <proposed_plan> ... </proposed_plan>
-- For the final plan:
-  - Use 4-10 checklist items.
-  - Format each item as: - [ ] ...
-  - Keep steps concrete and verifiable.
-  - Include at least one explicit verification step.
 - No prose before or after the final <proposed_plan> block.`, workDir)
 }
 
@@ -81,12 +92,27 @@ func mockPlanResponse(input string) string {
 	}
 
 	return fmt.Sprintf(`<proposed_plan>
+# Plan: %s
+
+## Summary
+- Produce a decision-complete plan grounded in the repo.
+- Minimize assumptions; record any defaults explicitly.
+
+## Assumptions
+- The implementation will prioritize minimal, testable changes over refactors.
+
+## Plan
 - [ ] Confirm scope, constraints, and acceptance criteria for: %s
-- [ ] Inspect project structure and identify files/components involved.
-- [ ] Compare current behavior against expected outcomes and note gaps.
-- [ ] Define ordered implementation steps with minimal, testable changes.
-- [ ] Add verification checks for each critical requirement before completion.
-</proposed_plan>`, task)
+- [ ] Inspect project structure and identify the specific files/components involved.
+- [ ] Describe the intended behavior precisely (inputs/outputs, edge cases, errors).
+- [ ] Outline the minimal code changes required, in order, with concrete file targets.
+- [ ] Call out any public API/interface/schema changes (if applicable).
+- [ ] Note any risks, compatibility concerns, or migrations (if applicable).
+
+## Verification
+- [ ] Run the most relevant unit/integration tests (or add a small smoke check if none exist).
+- [ ] Validate the change against the stated acceptance criteria.
+</proposed_plan>`, task, task)
 }
 
 func extractPlanChecklistItems(raw string) []string {
@@ -106,10 +132,11 @@ func extractPlanChecklistItems(raw string) []string {
 
 		item := ""
 		switch {
-		case strings.HasPrefix(lower, "- [ ] "):
-			item = strings.TrimSpace(line[6:])
-		case strings.HasPrefix(lower, "- [x] "):
-			item = strings.TrimSpace(line[6:])
+		case planCheckboxLineRE.MatchString(line):
+			m := planCheckboxLineRE.FindStringSubmatch(line)
+			if len(m) >= 2 {
+				item = strings.TrimSpace(m[1])
+			}
 		case strings.HasPrefix(lower, "- "):
 			item = strings.TrimSpace(line[2:])
 		case strings.HasPrefix(lower, "* "):
@@ -145,15 +172,57 @@ func hasVerificationStep(items []string) bool {
 	return false
 }
 
+func wrapProposedPlan(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	return "<proposed_plan>\n" + body + "\n</proposed_plan>"
+}
+
+func ensureVerificationInPlanBody(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return body
+	}
+
+	// Prefer checkbox-style items for verification detection, but fall back to list items.
+	items := extractPlanChecklistItems(body)
+	if hasVerificationStep(items) {
+		return body
+	}
+
+	// Append a small verification section rather than silently changing existing steps.
+	var b strings.Builder
+	b.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n## Verification\n")
+	b.WriteString("- [ ] Run a quick verification (tests/build/smoke) that exercises the changed behavior.\n")
+	return strings.TrimSpace(b.String())
+}
+
 func isPlanResponseShape(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return false
 	}
+
+	body := raw
 	if m := proposedPlanBlockRE.FindStringSubmatch(raw); len(m) >= 2 {
-		return len(extractPlanChecklistItems(m[1])) >= 2
+		body = strings.TrimSpace(m[1])
+		if body == "" {
+			return false
+		}
 	}
-	return len(extractPlanChecklistItems(raw)) >= 3
+
+	items := extractPlanChecklistItems(body)
+	if len(items) >= 4 {
+		return true
+	}
+	// Be permissive if a <proposed_plan> block exists and contains some concrete steps.
+	return len(items) >= 2 && proposedPlanBlockRE.MatchString(raw)
 }
 
 func fallbackPlanResponse(input string) string {
@@ -165,12 +234,27 @@ func fallbackPlanResponse(input string) string {
 		task = task[:140] + "..."
 	}
 	return fmt.Sprintf(`<proposed_plan>
+# Plan: %s
+
+## Summary
+- Outline the smallest set of concrete changes to deliver the request.
+- Record assumptions and provide verification steps.
+
+## Assumptions
+- Missing preferences will use sensible defaults and be called out explicitly.
+
+## Plan
 - [ ] Clarify scope, constraints, and expected output for: %s
 - [ ] Inspect the relevant files and current implementation details.
-- [ ] Break implementation into small, ordered, verifiable changes.
-- [ ] Define validation checks and acceptance criteria for each change.
-- [ ] Execute in Create mode only after plan approval.
-</proposed_plan>`, task)
+- [ ] Break the implementation into small, ordered, verifiable changes.
+- [ ] Identify exact files/functions/commands involved for each step.
+- [ ] Specify any configuration/env changes and the chosen defaults.
+- [ ] Note edge cases, failure modes, and any compatibility concerns.
+
+## Verification
+- [ ] Run a targeted build/test/smoke check that covers the core behavior.
+- [ ] Confirm acceptance criteria are met.
+</proposed_plan>`, task, task)
 }
 
 func normalizePlanResponse(raw string, input string) string {
@@ -184,23 +268,14 @@ func normalizePlanResponse(raw string, input string) string {
 		body = strings.TrimSpace(m[1])
 	}
 
+	// If the model returned a bare checklist without tags, wrap it.
 	items := extractPlanChecklistItems(body)
 	if len(items) == 0 {
 		return fallbackPlanResponse(input)
 	}
-	if !hasVerificationStep(items) {
-		items = append(items, "Verify assumptions and expected outcomes with quick checks before implementation.")
-	}
 
-	var b strings.Builder
-	b.WriteString("<proposed_plan>\n")
-	for _, item := range items {
-		b.WriteString("- [ ] ")
-		b.WriteString(strings.TrimSpace(item))
-		b.WriteString("\n")
-	}
-	b.WriteString("</proposed_plan>")
-	return b.String()
+	body = ensureVerificationInPlanBody(body)
+	return wrapProposedPlan(body)
 }
 
 func renderPlanStateForChat(state *AgentState, input string) string {
@@ -292,7 +367,7 @@ func (a *Application) executePlanModeWithProgressEvents(
 		return GetPlanAgentSystemPrompt(agent.WorkDir)
 	}
 	agent.FinalResponseValidator = isPlanResponseShape
-	agent.FinalResponseGuidance = "Continue gathering context with read-only tools as needed. When ready, respond ONLY with a <proposed_plan>...</proposed_plan> checklist (4-10 items)."
+	agent.FinalResponseGuidance = "Continue gathering context with read-only tools as needed. When ready, respond ONLY with a single <proposed_plan>...</proposed_plan> block containing: title, summary, assumptions, plan checklist, verification checklist."
 
 	toolCtx, cancel := context.WithTimeout(ctx, 9*time.Minute)
 	defer cancel()

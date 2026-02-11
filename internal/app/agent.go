@@ -874,7 +874,7 @@ loop:
 					if failed {
 						promptMsg := AgentMessage{
 							Role:      "user",
-							Content:   fmt.Sprintf("VERIFICATION FAILED for command: %s\nFix the issue and continue. After fixing, run verification again and only then respond TASK_COMPLETED.", cmdStr),
+							Content:   fmt.Sprintf("VERIFICATION FAILED for command: %s\nFix the issue and continue. After fixing, run verification again and only then respond with a final report ending with TASK_COMPLETED.", cmdStr),
 							Timestamp: time.Now(),
 						}
 						state.Messages = append(state.Messages, promptMsg)
@@ -921,7 +921,7 @@ loop:
 			if !hasExecutedTools {
 				actionPrompt += "For write_file: Keep content SHORT. Write skeleton code first, then add details incrementally."
 			} else {
-				actionPrompt += "If the task is truly complete, respond with exactly: TASK_COMPLETED"
+				actionPrompt += "If the task is truly complete, respond with a brief final report ending with the line: TASK_COMPLETED"
 			}
 
 			promptMsg := AgentMessage{
@@ -2335,28 +2335,26 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		tmp, err := os.CreateTemp("", "eai-patch-*.diff")
+		data, err := os.ReadFile(path)
 		if err != nil {
 			result.Error = err.Error()
 			result.DurationMs = time.Since(start).Milliseconds()
 			return result
 		}
-		tmpPath := tmp.Name()
-		_, _ = tmp.WriteString(args.Patch)
-		_ = tmp.Close()
-		defer os.Remove(tmpPath)
 
-		// Apply the patch non-interactively.
-		cmd := exec.CommandContext(ctx, "patch", "--batch", "-u", path, "-i", tmpPath)
-		if l.WorkDir != "" {
-			cmd.Dir = l.WorkDir
-		}
-		output, err := cmd.CombinedOutput()
+		updated, err := ApplyUnifiedPatch(string(data), args.Patch)
 		if err != nil {
 			result.Error = err.Error()
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
 		}
-		result.Output = truncateToolOutput(string(output))
-		result.Success = err == nil
+		if err := writeFilePreserveMode(path, []byte(updated)); err != nil {
+			result.Error = err.Error()
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+		result.Output = fmt.Sprintf("File patched: %s", path)
+		result.Success = true
 
 	default:
 		result.Error = fmt.Sprintf("Unknown tool: %s", call.Name)
