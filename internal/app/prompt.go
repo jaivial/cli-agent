@@ -292,8 +292,8 @@ func (p *PromptBuilder) Build(mode Mode, userInput string) string {
 }
 
 // BuildChat constructs a prompt suitable for interactive chat (human-readable responses).
-func (p *PromptBuilder) BuildChat(mode Mode, userInput string) string {
-	systemPrompt := GetChatSystemPrompt(mode, "")
+func (p *PromptBuilder) BuildChat(mode Mode, userInput string, verbosity string) string {
+	systemPrompt := GetChatSystemPrompt(mode, "", verbosity)
 
 	context := GetProjectContext()
 	if context != "" {

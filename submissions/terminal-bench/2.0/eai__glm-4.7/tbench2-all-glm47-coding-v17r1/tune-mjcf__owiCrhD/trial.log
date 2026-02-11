@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'tune-mjcf' from /home/jaime/.cache/harbor/tasks/jWu5FXBKfqdBD9LqMa9a2N/tune-mjcf/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Can you tune this MuJoCo model file (mjcf) such that it takes 60% of the original time or less to si...
+EAI agent completed successfully

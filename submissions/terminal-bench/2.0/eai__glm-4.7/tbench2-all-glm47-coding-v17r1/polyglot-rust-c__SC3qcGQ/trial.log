@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'polyglot-rust-c' from /home/jaime/.cache/harbor/tasks/hf6AShq4ZZHdwGTt8JGpEG/polyglot-rust-c/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Write me a single file in /app/polyglot/main.rs which is a polyglot, that is, I can run
+
+`rustc /app...
+EAI agent completed successfully

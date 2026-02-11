@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'overfull-hbox' from /home/jaime/.cache/harbor/tasks/ca36CXF7yAdWnRdpyfoihT/overfull-hbox/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: Ensure that the LaTeX document main.tex compiles successfully using the installed TeX distribution a...
+EAI agent completed successfully

@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'financial-document-processor' from /home/jaime/.cache/harbor/tasks/T9eC49XFCYopUM2bDKgar3/financial-document-processor/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You have a collection of mixed document files in the `/app/documents/` directory containing both JPG...
+EAI agent completed successfully

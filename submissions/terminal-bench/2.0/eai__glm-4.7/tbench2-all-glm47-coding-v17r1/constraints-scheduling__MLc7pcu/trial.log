@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'constraints-scheduling' from /home/jaime/.cache/harbor/tasks/CrxDfvhBFmo3ahvG2RfDM3/constraints-scheduling/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Find a 1-hour meeting slot for Alice, Bob, and Carol during January 15-19, 2024 (business hours: 9 A...
+EAI agent completed successfully

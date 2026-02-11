@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'raman-fitting' from /home/jaime/.cache/harbor/tasks/kWbDWup9MzjJLPn6gz9P6H/raman-fitting/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given the output file of a Raman Setup. We used it to measure some graphene sample.
+Fit the ...
+EAI agent completed successfully

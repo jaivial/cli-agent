@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'regex-chess' from /home/jaime/.cache/harbor/tasks/XyJK3D4eSbPWgNt9Bw4RyU/regex-chess/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Write a JSON file called /app/re.json that is a list of [regex, replacement] pairs. When executed in...
+EAI agent completed successfully

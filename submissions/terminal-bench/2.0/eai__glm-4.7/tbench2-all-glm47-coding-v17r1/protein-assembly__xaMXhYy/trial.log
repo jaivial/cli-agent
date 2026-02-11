@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'protein-assembly' from /home/jaime/.cache/harbor/tasks/mJUNThPAPTj7sAa9DCoPrh/protein-assembly/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I am planning an experiment where I'll be testing the stability of dihydrofolate reductase (DHFR) wi...
+EAI agent completed successfully

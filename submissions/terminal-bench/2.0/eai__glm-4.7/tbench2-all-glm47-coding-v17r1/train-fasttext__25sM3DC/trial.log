@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'train-fasttext' from /home/jaime/.cache/harbor/tasks/QUdXqzZFwRrgRZ7SPHyxto/train-fasttext/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Please train a fasttext model on the yelp data in the data/ folder.
+
+The final model size needs to b...
+EAI agent completed successfully

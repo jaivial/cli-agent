@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'feal-linear-cryptanalysis' from /home/jaime/.cache/harbor/tasks/LVyG59RRyF7y2PiCy5VT3B/feal-linear-cryptanalysis/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file /app/feal.c implements a FEAL-like encryption function,
+with /app/decrypt.c being the corre...
+EAI agent completed successfully

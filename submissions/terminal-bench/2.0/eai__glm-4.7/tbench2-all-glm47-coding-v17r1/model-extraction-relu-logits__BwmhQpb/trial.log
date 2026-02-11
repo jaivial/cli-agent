@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'model-extraction-relu-logits' from /home/jaime/.cache/harbor/tasks/8WGyid6WdyvC3RsCcr7kLU/model-extraction-relu-logits/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a ReLU neural network that you can query by importing `forward.py` and calling forward(x) whi...
+EAI agent completed successfully

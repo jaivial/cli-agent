@@ -1,0 +1,95 @@
+{
+    "id": "3573aca0-20d8-458a-b97b-fb72ceb1c2e8",
+    "task_name": "overfull-hbox",
+    "trial_name": "overfull-hbox__kuZFApY",
+    "trial_uri": "file:///home/jaime/Downloads/projects/cli-agent/jobs/tbench2-all-glm47-coding-v17r1/overfull-hbox__kuZFApY",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "overfull-hbox"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "96c3365a4d527007766a44afa802cd19d8601eb13b458cf4e7a2c1dce8058cb7",
+    "config": {
+        "task": {
+            "path": "overfull-hbox",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "overfull-hbox__kuZFApY",
+        "trials_dir": "jobs/tbench2-all-glm47-coding-v17r1",
+        "timeout_multiplier": 1.0,
+        "agent": {
+            "name": null,
+            "import_path": "eai_agent.agent:EaiAgent",
+            "model_name": null,
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "kwargs": {
+                "max_loops": 60,
+                "base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+                "model": "glm-4.7",
+                "max_tokens": 4096
+            }
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": false,
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "suppress_override_warnings": false,
+            "kwargs": {}
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "job_id": "6f7102f0-1e49-4769-8ba4-abe7ee374ce6"
+    },
+    "agent_info": {
+        "name": "eai",
+        "version": "2.0.0",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": null
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 1.0
+        }
+    },
+    "exception_info": null,
+    "started_at": "2026-02-09T15:38:36.611614Z",
+    "finished_at": "2026-02-09T15:39:54.614780Z",
+    "environment_setup": {
+        "started_at": "2026-02-09T15:38:36.613055Z",
+        "finished_at": "2026-02-09T15:38:44.857780Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-02-09T15:38:44.857787Z",
+        "finished_at": "2026-02-09T15:39:05.609838Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-02-09T15:39:05.609866Z",
+        "finished_at": "2026-02-09T15:39:06.615298Z"
+    },
+    "verifier": {
+        "started_at": "2026-02-09T15:39:06.615360Z",
+        "finished_at": "2026-02-09T15:39:44.005374Z"
+    }
+}

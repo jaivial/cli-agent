@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'gpt2-codegolf' from /home/jaime/.cache/harbor/tasks/CGqXnFmcaVcQCTbCZMpg2T/gpt2-codegolf/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have downloaded the gpt-2 weights stored as a TF .ckpt. Write me a dependency-free C file that sam...
+EAI agent completed successfully

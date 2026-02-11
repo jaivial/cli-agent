@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'adaptive-rejection-sampler' from /home/jaime/.cache/harbor/tasks/gaFWu2WFUf2THiMG8Ezdxo/adaptive-rejection-sampler/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Your task is to implement an adaptive-rejection sampler as described in Gilks et al. (1992). 
+
+1. Yo...
+EAI agent completed successfully

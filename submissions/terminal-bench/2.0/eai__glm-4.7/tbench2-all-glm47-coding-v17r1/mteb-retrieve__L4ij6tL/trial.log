@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'mteb-retrieve' from /home/jaime/.cache/harbor/tasks/J63TLMqMZcCeiRe8KAiy5T/mteb-retrieve/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Given the query "terminal-bench" retrieve the document with the 5th highest cosine similarity among ...
+EAI agent completed successfully

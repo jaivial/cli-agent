@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'dna-assembly' from /home/jaime/.cache/harbor/tasks/ArEmuSGC435pAkSA7cv8qw/dna-assembly/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file titled sequences.fasta contains the following sequences:
+  * input: A circular input plasmi...
+EAI agent completed successfully

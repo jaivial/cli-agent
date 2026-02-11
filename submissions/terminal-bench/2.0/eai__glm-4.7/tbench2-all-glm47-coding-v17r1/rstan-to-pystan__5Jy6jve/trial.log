@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'rstan-to-pystan' from /home/jaime/.cache/harbor/tasks/869oU8dUyJHL4uUFPzhKJM/rstan-to-pystan/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given datasets /app/train_X.csv, /app/train_y.csv, /app/test_X.csv, /app/meta_public.json; a...
+EAI agent completed successfully

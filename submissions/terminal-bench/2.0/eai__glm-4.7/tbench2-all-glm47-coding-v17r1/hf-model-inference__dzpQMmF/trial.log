@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'hf-model-inference' from /home/jaime/.cache/harbor/tasks/DcF3L5bfEpwdBkhfr3hgHe/hf-model-inference/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Set up a local service to run inference with a Hugging Face transformer model.
+
+1. Download the "dis...
+EAI agent completed successfully

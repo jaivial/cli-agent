@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'gcode-to-text' from /home/jaime/.cache/harbor/tasks/JK5CeLoen6gxrbEkrjQ94D/gcode-to-text/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have provided a file called text.gcode. This is a gcode file for a Prusa MK4s. I'm trying to print...
+EAI agent completed successfully

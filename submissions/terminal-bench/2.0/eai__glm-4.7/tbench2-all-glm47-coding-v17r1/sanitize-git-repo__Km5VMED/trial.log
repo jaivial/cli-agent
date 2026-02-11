@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'sanitize-git-repo' from /home/jaime/.cache/harbor/tasks/WNjEws4zKtRNWJABpoU892/sanitize-git-repo/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: Please help sanitize my github repository "dclm" of all API keys.
+
+Please find and remove all such i...
+EAI agent completed successfully

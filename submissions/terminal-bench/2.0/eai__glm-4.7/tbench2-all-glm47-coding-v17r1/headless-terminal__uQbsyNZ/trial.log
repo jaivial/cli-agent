@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'headless-terminal' from /home/jaime/.cache/harbor/tasks/KSwQXLapvDLmcHTvZcJVQG/headless-terminal/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Implement the provided `BaseTerminal` interface. It provides a simple python interface to send keys ...
+EAI agent completed successfully

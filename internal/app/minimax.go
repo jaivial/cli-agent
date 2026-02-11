@@ -59,12 +59,14 @@ type zaiChatCompletionRequest struct {
 }
 
 type zaiChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type zaiChatDelta struct {
-	Content string `json:"content"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type zaiChatCompletionChoice struct {
@@ -136,6 +138,10 @@ func NewMinimaxClient(apiKey, model, baseURL string, maxTokens int) *MinimaxClie
 }
 
 func (c *MinimaxClient) Complete(ctx context.Context, prompt string) (string, error) {
+	return c.CompleteWithObserver(ctx, prompt, nil)
+}
+
+func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
 	// Mock mode check
 	if c.APIKey == "mock" || c.BaseURL == "mock://" {
 		return c.mockComplete(ctx, prompt)
@@ -176,9 +182,9 @@ func (c *MinimaxClient) Complete(ctx context.Context, prompt string) (string, er
 
 		// Z.ai: /chat/completions (OpenAI-style)
 		if isZAiBaseURL(c.BaseURL) {
-			out, err = c.completeZAiChatCompletions(reqCtx, prompt)
+			out, err = c.completeZAiChatCompletions(reqCtx, prompt, onReasoning)
 		} else {
-			out, err = c.completeMinimaxAnthropic(reqCtx, prompt)
+			out, err = c.completeMinimaxAnthropic(reqCtx, prompt, onReasoning)
 		}
 		if cancel != nil {
 			cancel()
@@ -230,7 +236,7 @@ func isRetryableLLMError(err error) bool {
 	return false
 }
 
-func (c *MinimaxClient) completeMinimaxAnthropic(ctx context.Context, prompt string) (string, error) {
+func (c *MinimaxClient) completeMinimaxAnthropic(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
 
 	reqBody := minimaxRequest{
 		Model:     c.Model,
@@ -302,6 +308,9 @@ func (c *MinimaxClient) completeMinimaxAnthropic(ctx context.Context, prompt str
 				}
 			}
 		}
+		if onReasoning != nil && strings.TrimSpace(thinkingContent) != "" {
+			onReasoning(thinkingContent)
+		}
 
 		// Prefer text content, fall back to thinking content if needed
 		if textContent != "" {
@@ -346,7 +355,7 @@ func zaiChatCompletionsURL(baseURL string) string {
 	return base + "/chat/completions"
 }
 
-func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt string) (string, error) {
+func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
 	url := zaiChatCompletionsURL(c.BaseURL)
 	reqBody := zaiChatCompletionRequest{
 		Model:       c.Model,
@@ -413,7 +422,11 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 		if respDirect.Error != nil {
 			return "", fmt.Errorf("z.ai api error: %s", respDirect.Error.Message)
 		}
-		if content := extractZAiChoiceContent(respDirect.Choices); content != "" {
+		content, reasoning := extractZAiChoiceContent(respDirect.Choices)
+		if onReasoning != nil && strings.TrimSpace(reasoning) != "" {
+			onReasoning(reasoning)
+		}
+		if content != "" {
 			return content, nil
 		}
 	}
@@ -432,7 +445,11 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 		if respWrapped.Data.Error != nil && respWrapped.Data.Error.Message != "" {
 			return "", fmt.Errorf("z.ai api error: %s", respWrapped.Data.Error.Message)
 		}
-		if content := extractZAiChoiceContent(respWrapped.Data.Choices); content != "" {
+		content, reasoning := extractZAiChoiceContent(respWrapped.Data.Choices)
+		if onReasoning != nil && strings.TrimSpace(reasoning) != "" {
+			onReasoning(reasoning)
+		}
+		if content != "" {
 			return content, nil
 		}
 		if respWrapped.Message != "" && respWrapped.Code != 0 {
@@ -443,16 +460,26 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 	return "", fmt.Errorf("invalid z.ai api response format: %s", string(bodyBytes))
 }
 
-func extractZAiChoiceContent(choices []zaiChatCompletionChoice) string {
+func extractZAiChoiceContent(choices []zaiChatCompletionChoice) (content string, reasoning string) {
 	for _, ch := range choices {
-		if ch.Message != nil && strings.TrimSpace(ch.Message.Content) != "" {
-			return ch.Message.Content
+		if ch.Message != nil {
+			if reasoning == "" && strings.TrimSpace(ch.Message.ReasoningContent) != "" {
+				reasoning = ch.Message.ReasoningContent
+			}
+			if strings.TrimSpace(ch.Message.Content) != "" {
+				return ch.Message.Content, reasoning
+			}
 		}
-		if ch.Delta != nil && strings.TrimSpace(ch.Delta.Content) != "" {
-			return ch.Delta.Content
+		if ch.Delta != nil {
+			if reasoning == "" && strings.TrimSpace(ch.Delta.ReasoningContent) != "" {
+				reasoning = ch.Delta.ReasoningContent
+			}
+			if strings.TrimSpace(ch.Delta.Content) != "" {
+				return ch.Delta.Content, reasoning
+			}
 		}
 	}
-	return ""
+	return "", reasoning
 }
 
 // mockComplete simulates API responses for testing
@@ -539,6 +566,10 @@ func generateMockResponse(task string) (string, error) {
 
 	// More flexible pattern matching
 	switch {
+	case strings.Contains(taskLower, "website") && strings.Contains(taskLower, "html"):
+		// For TUI chat-mode tests: return a plain HTML document (not tool calls).
+		return "<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Pet Store</title></head>\n<body><h1>Pet Store</h1></body>\n</html>\n", nil
+
 	case strings.Contains(taskLower, "list") && strings.Contains(taskLower, "file"):
 		return `{"tool_calls":[{"id":"list_dir_1","name":"list_dir","arguments":{"path":"."}}]}`, nil
 

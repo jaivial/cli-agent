@@ -1,0 +1,10 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'multi-source-data-merger' from /home/jaime/.cache/harbor/tasks/cMPqfgxjNH2qnnDVdWSFb8/multi-source-data-merger/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Merge user data from three different sources with different formats and schemas.
+
+Input files:
+
+- /d...
+EAI agent completed successfully

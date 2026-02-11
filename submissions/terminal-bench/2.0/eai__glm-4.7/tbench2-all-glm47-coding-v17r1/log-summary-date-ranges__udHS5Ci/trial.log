@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'log-summary-date-ranges' from /home/jaime/.cache/harbor/tasks/fqGNZJec57abmbsxYbQAz5/log-summary-date-ranges/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given multiple log files stored in /app/logs. Each log file name follows the pattern YYYY-MM...
+EAI agent completed successfully

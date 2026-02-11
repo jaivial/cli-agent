@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'qemu-startup' from /home/jaime/.cache/harbor/tasks/gHS2mTGhPaYTuJWpCkw4J9/qemu-startup/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Start the /app/alpine.iso image in qemu in such a way that I can connect to it via `telnet 127.0.0.1...
+EAI agent completed successfully

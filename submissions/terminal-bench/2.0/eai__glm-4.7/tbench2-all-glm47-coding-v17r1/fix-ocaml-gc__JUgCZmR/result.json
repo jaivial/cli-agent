@@ -1,0 +1,95 @@
+{
+    "id": "b93da882-3ac7-4fe3-96b7-9bdb2a0e6040",
+    "task_name": "fix-ocaml-gc",
+    "trial_name": "fix-ocaml-gc__JUgCZmR",
+    "trial_uri": "file:///home/jaime/Downloads/projects/cli-agent/jobs/tbench2-all-glm47-coding-v17r1/fix-ocaml-gc__JUgCZmR",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "fix-ocaml-gc"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "faa983dd79f63daa168b41c753bddb0621822820ba6f16661a9767b815e436e8",
+    "config": {
+        "task": {
+            "path": "fix-ocaml-gc",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "fix-ocaml-gc__JUgCZmR",
+        "trials_dir": "jobs/tbench2-all-glm47-coding-v17r1",
+        "timeout_multiplier": 1.0,
+        "agent": {
+            "name": null,
+            "import_path": "eai_agent.agent:EaiAgent",
+            "model_name": null,
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "kwargs": {
+                "max_loops": 60,
+                "base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+                "model": "glm-4.7",
+                "max_tokens": 4096
+            }
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": false,
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "suppress_override_warnings": false,
+            "kwargs": {}
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "job_id": "6f7102f0-1e49-4769-8ba4-abe7ee374ce6"
+    },
+    "agent_info": {
+        "name": "eai",
+        "version": "2.0.0",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": null
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 1.0
+        }
+    },
+    "exception_info": null,
+    "started_at": "2026-02-09T15:52:44.843612Z",
+    "finished_at": "2026-02-09T16:00:17.629111Z",
+    "environment_setup": {
+        "started_at": "2026-02-09T15:52:44.844335Z",
+        "finished_at": "2026-02-09T15:53:01.792194Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-02-09T15:53:01.792209Z",
+        "finished_at": "2026-02-09T15:53:11.423051Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-02-09T15:53:11.423078Z",
+        "finished_at": "2026-02-09T15:53:11.954956Z"
+    },
+    "verifier": {
+        "started_at": "2026-02-09T15:53:11.955011Z",
+        "finished_at": "2026-02-09T16:00:07.034871Z"
+    }
+}

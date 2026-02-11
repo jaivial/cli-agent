@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +38,9 @@ func init() {
 	RegisterTool("grep", executeGrepTool)
 	RegisterTool("search_files", executeSearchFilesTool)
 	RegisterTool("edit_file", executeEditFileTool)
+	RegisterTool("append_file", executeAppendFileTool)
+	RegisterTool("patch_file", executePatchFileTool)
+	RegisterTool("http_request", executeHTTPRequestTool)
 }
 
 // executeExecTool executes the exec tool
@@ -320,6 +325,179 @@ func validatePath(path string) error {
 		return fmt.Errorf("path traversal detected: %s", path)
 	}
 	return nil
+}
+
+// executeAppendFileTool executes the append_file tool
+func executeAppendFileTool(ctx context.Context, args json.RawMessage, l *AgentLoop) ToolResult {
+	start := time.Now()
+	result := ToolResult{Success: false}
+
+	var appendArgs struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(args, &appendArgs); err != nil {
+		result.Error = fmt.Sprintf("Failed to parse arguments: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Validate path for security
+	if err := validatePath(appendArgs.Path); err != nil {
+		result.Error = err.Error()
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Create directory if needed
+	dir := filepath.Dir(appendArgs.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		result.Error = fmt.Sprintf("Failed to create directory: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Open file in append mode or create it
+	f, err := os.OpenFile(appendArgs.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		result.Error = err.Error()
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(appendArgs.Content); err != nil {
+		result.Error = err.Error()
+	} else {
+		result.Output = fmt.Sprintf("Content appended to: %s", appendArgs.Path)
+		result.Success = true
+	}
+
+	result.DurationMs = time.Since(start).Milliseconds()
+	return result
+}
+
+// executePatchFileTool executes the patch_file tool
+func executePatchFileTool(ctx context.Context, args json.RawMessage, l *AgentLoop) ToolResult {
+	start := time.Now()
+	result := ToolResult{Success: false}
+
+	var patchArgs struct {
+		Path  string `json:"path"`
+		Patch string `json:"patch"`
+	}
+	if err := json.Unmarshal(args, &patchArgs); err != nil {
+		result.Error = fmt.Sprintf("Failed to parse arguments: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Validate path for security
+	if err := validatePath(patchArgs.Path); err != nil {
+		result.Error = err.Error()
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Create a temporary file for the patch
+	tmpDir := os.TempDir()
+	patchFile := filepath.Join(tmpDir, fmt.Sprintf("patch_%d.patch", time.Now().UnixNano()))
+	if err := os.WriteFile(patchFile, []byte(patchArgs.Patch), 0644); err != nil {
+		result.Error = fmt.Sprintf("Failed to write patch file: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+	defer os.Remove(patchFile)
+
+	// Apply the patch using the patch command
+	cmd := exec.CommandContext(ctx, "patch", "-p0", "-i", patchFile, patchArgs.Path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		result.Error = fmt.Sprintf("Patch failed: %v\nOutput: %s", err, string(output))
+	} else {
+		result.Output = fmt.Sprintf("File patched: %s\nOutput: %s", patchArgs.Path, string(output))
+		result.Success = true
+	}
+
+	result.DurationMs = time.Since(start).Milliseconds()
+	return result
+}
+
+// executeHTTPRequestTool executes the http_request tool
+func executeHTTPRequestTool(ctx context.Context, args json.RawMessage, l *AgentLoop) ToolResult {
+	start := time.Now()
+	result := ToolResult{Success: false}
+
+	var httpArgs struct {
+		Method  string            `json:"method"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Body    string            `json:"body"`
+		Timeout int               `json:"timeout"`
+	}
+	if err := json.Unmarshal(args, &httpArgs); err != nil {
+		result.Error = fmt.Sprintf("Failed to parse arguments: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	if httpArgs.Method == "" {
+		httpArgs.Method = "GET"
+	}
+
+	// Set timeout
+	timeout := 30 * time.Second
+	if httpArgs.Timeout > 0 {
+		timeout = time.Duration(httpArgs.Timeout) * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, httpArgs.Method, httpArgs.URL, strings.NewReader(httpArgs.Body))
+	if err != nil {
+		result.Error = fmt.Sprintf("Failed to create request: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Add headers
+	for key, value := range httpArgs.Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Execute request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Error = fmt.Sprintf("Request failed: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		result.Error = fmt.Sprintf("Failed to read response: %v", err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	// Build response output
+	output := fmt.Sprintf("Status: %d %s\n", resp.StatusCode, resp.Status)
+	for key, values := range resp.Header {
+		for _, value := range values {
+			output += fmt.Sprintf("%s: %s\n", key, value)
+		}
+	}
+	output += fmt.Sprintf("\nBody:\n%s", string(body))
+
+	result.Output = output
+	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
+	result.DurationMs = time.Since(start).Milliseconds()
+	return result
 }
 
 // executeToolWithRetry executes a tool with retry logic for transient failures

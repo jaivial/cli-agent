@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'configure-git-webserver' from /home/jaime/.cache/harbor/tasks/c3FnWBpp4RmfpMvyGn8Wpv/configure-git-webserver/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Configure a git server so that I can run on my computer
+    git clone user@server:/git/server
+    ec...
+EAI agent completed successfully

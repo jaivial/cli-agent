@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'path-tracing' from /home/jaime/.cache/harbor/tasks/9BGkwkiZs6r3NTmoLCLzr9/path-tracing/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I've put an image at /app/image.ppm that I rendered programmatically. Write a c program image.c that...
+EAI agent completed successfully

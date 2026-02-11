@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'sam-cell-seg' from /home/jaime/.cache/harbor/tasks/n9EXHRQn8C4KGZQgXQEvZU/sam-cell-seg/tests
+Preloaded 5 test file(s) into /tests
+Running eai agent with instruction: I have annotated histopathology slides with cell masks. The problem is that some of the masks 
+are r...
+EAI agent completed successfully

@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'install-windows-3.11' from /home/jaime/.cache/harbor/tasks/7s8y623XYuDhmBG6ERABwC/install-windows-3.11/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Run Windows 3.11 for Workgroups in a virtual machine using qemu. You image is in `/app/isos/win311.i...
+EAI agent completed successfully

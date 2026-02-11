@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'torch-tensor-parallelism' from /home/jaime/.cache/harbor/tasks/8njYn5Af8tPLKjM5cFeNvR/torch-tensor-parallelism/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Implement tensor parallelism for linear layers using PyTorch. 
+Create the file /app/parallel_linear....
+EAI agent completed successfully

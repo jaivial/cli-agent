@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'filter-js-from-html' from /home/jaime/.cache/harbor/tasks/SeKnWxFXAqYwFdRQvLn2Wk/filter-js-from-html/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Create a python file /app/filter.py that removes JavaScript from HTML files to prevent XSS attacks. ...
+EAI agent completed successfully

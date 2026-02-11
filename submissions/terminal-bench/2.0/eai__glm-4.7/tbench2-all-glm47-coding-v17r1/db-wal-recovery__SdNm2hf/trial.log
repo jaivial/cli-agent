@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'db-wal-recovery' from /home/jaime/.cache/harbor/tasks/X4QTPPGhjzjJSVbTTETRUK/db-wal-recovery/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a database in WAL (Write-Ahead Logging) mode in /app/. 
+However, the WAL file appears to be c...
+EAI agent completed successfully

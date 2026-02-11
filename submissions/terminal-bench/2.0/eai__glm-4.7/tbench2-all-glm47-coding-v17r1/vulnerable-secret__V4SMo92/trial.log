@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'vulnerable-secret' from /home/jaime/.cache/harbor/tasks/RkUWMSfgcaHLyc3cnCt62s/vulnerable-secret/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Analyze the following program that contains a secret key. The goal is to extract this secret key and...
+EAI agent completed successfully

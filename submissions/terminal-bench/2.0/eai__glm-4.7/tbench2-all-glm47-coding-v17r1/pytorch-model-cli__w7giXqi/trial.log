@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'pytorch-model-cli' from /home/jaime/.cache/harbor/tasks/cEZY7Ut37eqdNnYKPebgYq/pytorch-model-cli/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Your task is to implement a command line tool that can be used to run inference on an MNIST model.
+T...
+EAI agent completed successfully

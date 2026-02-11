@@ -142,6 +142,76 @@ func isExplicitCompletion(response string) bool {
 	return false
 }
 
+func seemsLikeHTMLWebsiteTask(task string) bool {
+	s := strings.ToLower(strings.TrimSpace(task))
+	if s == "" {
+		return false
+	}
+	if !strings.Contains(s, "html") {
+		return false
+	}
+	if !(strings.Contains(s, "website") || strings.Contains(s, "web site") || strings.Contains(s, "landing page") || strings.Contains(s, "site")) {
+		return false
+	}
+	verbs := []string{"create", "build", "make", "generate", "write"}
+	for _, v := range verbs {
+		if strings.Contains(s, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeHTMLDocumentResponse(s string) bool {
+	sl := strings.ToLower(s)
+	if strings.Contains(sl, "<!doctype html") {
+		return true
+	}
+	return strings.Contains(sl, "<html") && strings.Contains(sl, "</html>")
+}
+
+func extractHTMLDocumentResponse(s string) (string, bool) {
+	trim := strings.TrimSpace(s)
+	if trim == "" {
+		return "", false
+	}
+	lower := strings.ToLower(trim)
+
+	// Prefer fenced blocks.
+	if i := strings.Index(lower, "```html"); i >= 0 {
+		rest := trim[i+len("```html"):]
+		rest = strings.TrimLeft(rest, "\n\r\t ")
+		if j := strings.Index(rest, "```"); j >= 0 {
+			cand := strings.TrimSpace(rest[:j])
+			if looksLikeHTMLDocumentResponse(cand) {
+				return cand, true
+			}
+		}
+	}
+
+	if !looksLikeHTMLDocumentResponse(trim) {
+		return "", false
+	}
+
+	start := strings.Index(lower, "<!doctype html")
+	if start < 0 {
+		start = strings.Index(lower, "<html")
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := strings.LastIndex(lower, "</html>")
+	if end < 0 {
+		return "", false
+	}
+	end += len("</html>")
+	cand := strings.TrimSpace(trim[start:end])
+	if cand == "" {
+		return "", false
+	}
+	return cand, true
+}
+
 // extractExpectedOutputFiles looks for file paths mentioned in the instruction
 func extractExpectedOutputFiles(instruction string) []string {
 	var paths []string
@@ -310,6 +380,19 @@ type ToolResult struct {
 	DurationMs int64  `json:"duration_ms"`
 }
 
+type ProgressEvent struct {
+	Kind       string    `json:"kind"`
+	Text       string    `json:"text"`
+	Tool       string    `json:"tool,omitempty"`
+	ToolCallID string    `json:"tool_call_id,omitempty"`
+	ToolStatus string    `json:"tool_status,omitempty"`
+	Path       string    `json:"path,omitempty"`
+	Command    string    `json:"command,omitempty"`
+	DurationMs int64     `json:"duration_ms,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	At         time.Time `json:"at,omitempty"`
+}
+
 type AgentState struct {
 	TaskID      string         `json:"task_id"`
 	Task        string         `json:"task"`
@@ -332,12 +415,16 @@ type AgentMessage struct {
 }
 
 type AgentLoop struct {
-	Client   *MinimaxClient
-	Tools    []Tool
-	MaxLoops int
-	StateDir string
-	WorkDir  string
-	Logger   *Logger
+	Client                 *MinimaxClient
+	Tools                  []Tool
+	MaxLoops               int
+	StateDir               string
+	WorkDir                string
+	Logger                 *Logger
+	Progress               func(ProgressEvent)
+	SystemMessageBuilder   func(task string) string
+	FinalResponseValidator func(response string) bool
+	FinalResponseGuidance  string
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -597,7 +684,20 @@ loop:
 	for state.Iteration < l.MaxLoops {
 		l.saveState(state)
 
-		response, err := l.Client.Complete(ctx, l.buildPrompt(state.Messages))
+		if state.Iteration == 0 {
+			l.emitProgress(ProgressEvent{Kind: "thinking", Text: "Planning approach"})
+		}
+
+		response, err := l.Client.CompleteWithObserver(ctx, l.buildPrompt(state.Messages), func(reasoning string) {
+			reasoning = strings.TrimSpace(reasoning)
+			if reasoning == "" {
+				return
+			}
+			l.emitProgress(ProgressEvent{
+				Kind: "reasoning",
+				Text: reasoning,
+			})
+		})
 		if err != nil {
 			l.Logger.Error("Failed to get model response", map[string]interface{}{
 				"error": err.Error(),
@@ -642,6 +742,37 @@ loop:
 
 		toolCalls := l.parseToolCalls(response)
 
+		// Salvage: some models ignore the JSON-only rule and dump a full HTML doc.
+		// If the task is clearly "create a website using HTML", convert that into a write_file.
+		if len(toolCalls) == 0 && seemsLikeHTMLWebsiteTask(task) {
+			if htmlDoc, ok := extractHTMLDocumentResponse(response); ok {
+				call := ToolCall{
+					ID:   "write_html_1",
+					Name: "write_file",
+					Arguments: mustMarshal(map[string]interface{}{
+						"path":    "index.html",
+						"content": htmlDoc,
+					}),
+				}
+				res := l.executeToolWithProgress(ctx, call)
+				state.Results = append(state.Results, res)
+				state.Messages = append(state.Messages, AgentMessage{
+					Role:        "user",
+					Content:     fmt.Sprintf("Tool result for %s:\n%s", call.Name, res.Output),
+					ToolResults: []ToolResult{res},
+					Timestamp:   time.Now(),
+				})
+
+				if res.Success {
+					state.Completed = true
+					state.FinalOutput = "TASK_COMPLETED"
+					state.EndedAt = time.Now()
+					l.saveState(state)
+					return state, nil
+				}
+			}
+		}
+
 		// Check for truncation if no tool calls found
 		if len(toolCalls) == 0 && isResponseTruncated(response) {
 			l.Logger.Warn("Response appears truncated", map[string]interface{}{
@@ -662,6 +793,12 @@ loop:
 		}
 
 		if len(toolCalls) == 0 {
+			if l.FinalResponseValidator != nil && l.FinalResponseValidator(response) {
+				state.Completed = true
+				state.FinalOutput = strings.TrimSpace(response)
+				break
+			}
+
 			consecutiveNoAction++
 
 			// Check if model explicitly says task is complete
@@ -717,7 +854,7 @@ loop:
 							"timeout": 900,
 						}),
 					}
-					verifyRes := l.executeTool(ctx, call)
+					verifyRes := l.executeToolWithProgress(ctx, call)
 					state.Results = append(state.Results, verifyRes)
 					state.Messages = append(state.Messages, AgentMessage{
 						Role:        "user",
@@ -760,6 +897,21 @@ loop:
 				break
 			}
 
+			if l.FinalResponseValidator != nil {
+				guidance := strings.TrimSpace(l.FinalResponseGuidance)
+				if guidance == "" {
+					guidance = "Use a tool call for additional discovery, or provide the final response in the required format."
+				}
+				promptMsg := AgentMessage{
+					Role:      "user",
+					Content:   guidance,
+					Timestamp: time.Now(),
+				}
+				state.Messages = append(state.Messages, promptMsg)
+				state.Iteration++
+				continue
+			}
+
 			// Prompt the model to take action with emphasis on brevity
 			actionPrompt := "You haven't taken any action yet. Please use one of the available tools to complete the task.\n" +
 				"IMPORTANT: Respond with ONLY the JSON tool call. No explanation, no prose.\n" +
@@ -786,7 +938,7 @@ loop:
 		consecutiveNoAction = 0
 
 		for _, call := range toolCalls {
-			result := l.executeTool(ctx, call)
+			result := l.executeToolWithProgress(ctx, call)
 			state.Results = append(state.Results, result)
 
 			resultMsg := AgentMessage{
@@ -878,6 +1030,12 @@ func (l *AgentLoop) buildPrompt(messages []AgentMessage) string {
 }
 
 func (l *AgentLoop) buildSystemMessage(task string) string {
+	if l.SystemMessageBuilder != nil {
+		if msg := strings.TrimSpace(l.SystemMessageBuilder(task)); msg != "" {
+			return msg
+		}
+	}
+
 	base := GetAgentSystemPrompt(l.WorkDir)
 
 	// Add lightweight category guidance when applicable.
@@ -948,6 +1106,218 @@ func normalizeJSONArgs(raw json.RawMessage) json.RawMessage {
 	}
 
 	return json.RawMessage(trim)
+}
+
+func progressTextForTool(call ToolCall) string {
+	switch call.Name {
+	case "list_dir":
+		return "Exploring directories"
+	case "search_files":
+		return "Searching files"
+	case "grep":
+		return "Searching content"
+	case "read_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		if strings.TrimSpace(args.Path) != "" {
+			p := strings.TrimSpace(args.Path)
+			return "Inspecting " + p
+		}
+		return "Reading files"
+	case "write_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		if strings.TrimSpace(args.Path) != "" {
+			p := strings.TrimSpace(args.Path)
+			pl := strings.ToLower(p)
+			if strings.HasSuffix(pl, ".html") {
+				return "Crafting " + p
+			}
+			return "Writing " + p
+		}
+		return "Writing files"
+	case "edit_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		if strings.TrimSpace(args.Path) != "" {
+			p := strings.TrimSpace(args.Path)
+			pl := strings.ToLower(p)
+			if strings.HasSuffix(pl, ".html") {
+				return "Refining " + p
+			}
+			return "Editing " + p
+		}
+		return "Editing files"
+	case "append_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		if strings.TrimSpace(args.Path) != "" {
+			return "Updating " + strings.TrimSpace(args.Path)
+		}
+		return "Updating files"
+	case "patch_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		if strings.TrimSpace(args.Path) != "" {
+			p := strings.TrimSpace(args.Path)
+			return "Patching " + p
+		}
+		return "Applying patch"
+	case "exec":
+		// Keep short; commands can be long.
+		var args struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		cmd := strings.TrimSpace(args.Command)
+		if cmd == "" {
+			return "Running commands"
+		}
+		// Keep it readable; avoid massive one-liners.
+		if len(cmd) > 60 {
+			cmd = cmd[:60] + "..."
+		}
+		return "Running: " + cmd
+	default:
+		return "Working"
+	}
+}
+
+func progressTextForToolStatus(call ToolCall, status string) string {
+	switch status {
+	case "completed":
+		switch call.Name {
+		case "exec":
+			return "Command finished"
+		case "read_file":
+			return "Read finished"
+		case "list_dir":
+			return "Directory listing finished"
+		case "search_files", "grep":
+			return "Search finished"
+		case "write_file", "edit_file", "append_file", "patch_file":
+			return "Edit finished"
+		default:
+			return "Step finished"
+		}
+	case "error":
+		switch call.Name {
+		case "exec":
+			return "Command failed"
+		case "read_file":
+			return "Read failed"
+		case "list_dir":
+			return "List failed"
+		case "search_files", "grep":
+			return "Search failed"
+		case "write_file", "edit_file", "append_file", "patch_file":
+			return "Edit failed"
+		default:
+			return "Step failed"
+		}
+	default:
+		return progressTextForTool(call)
+	}
+}
+
+func (l *AgentLoop) emitProgress(ev ProgressEvent) {
+	if l.Progress == nil {
+		return
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now()
+	}
+	l.Progress(ev)
+}
+
+func (l *AgentLoop) toolProgressDetails(call ToolCall) (path, command string) {
+	switch call.Name {
+	case "exec":
+		var args struct {
+			Command string `json:"command"`
+			Cwd     string `json:"cwd"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		command = strings.TrimSpace(args.Command)
+		path = strings.TrimSpace(args.Cwd)
+	case "read_file", "write_file", "edit_file", "append_file", "patch_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		path = strings.TrimSpace(args.Path)
+	case "list_dir":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		path = strings.TrimSpace(args.Path)
+	case "search_files":
+		var args struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		command = strings.TrimSpace(args.Pattern)
+		path = strings.TrimSpace(args.Path)
+	case "grep":
+		var args struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		command = strings.TrimSpace(args.Pattern)
+		path = strings.TrimSpace(args.Path)
+	}
+	return path, command
+}
+
+func (l *AgentLoop) emitToolProgress(call ToolCall, status string, durationMs int64, errText string) {
+	path, command := l.toolProgressDetails(call)
+	l.emitProgress(ProgressEvent{
+		Kind:       "tool",
+		Text:       progressTextForToolStatus(call, status),
+		Tool:       call.Name,
+		ToolCallID: call.ID,
+		ToolStatus: status,
+		Path:       path,
+		Command:    command,
+		DurationMs: durationMs,
+		Error:      strings.TrimSpace(errText),
+	})
+}
+
+func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) ToolResult {
+	if !l.toolNameAllowed(call.Name) {
+		errText := fmt.Sprintf("Tool not allowed in this mode: %s", call.Name)
+		result := ToolResult{
+			ToolCallID: call.ID,
+			Success:    false,
+			Error:      errText,
+			DurationMs: 0,
+		}
+		l.emitToolProgress(call, "error", 0, errText)
+		return result
+	}
+
+	l.emitToolProgress(call, "pending", 0, "")
+	result := l.executeTool(ctx, call)
+	if result.Success {
+		l.emitToolProgress(call, "completed", result.DurationMs, "")
+	} else {
+		l.emitToolProgress(call, "error", result.DurationMs, result.Error)
+	}
+	return result
 }
 
 func (l *AgentLoop) toolNameAllowed(name string) bool {

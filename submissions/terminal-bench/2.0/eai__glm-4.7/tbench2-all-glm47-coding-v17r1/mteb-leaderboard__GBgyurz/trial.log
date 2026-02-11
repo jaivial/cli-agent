@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'mteb-leaderboard' from /home/jaime/.cache/harbor/tasks/3aN2GgseP4MfXC7ixV7cXB/mteb-leaderboard/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: I have a lot of Scandinavian texts that I need to encode. Please provide me with the name in organiz...
+EAI agent completed successfully

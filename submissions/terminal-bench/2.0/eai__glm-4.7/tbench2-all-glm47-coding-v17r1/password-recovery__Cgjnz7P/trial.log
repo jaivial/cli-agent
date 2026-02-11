@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'password-recovery' from /home/jaime/.cache/harbor/tasks/7w8vEz8xG5Rmh59QkrpMp2/password-recovery/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You need to perform a digital forensic recovery task. A system administrator has accidentally delete...
+EAI agent completed successfully

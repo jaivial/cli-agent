@@ -39,7 +39,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("    COMPREPLY=()")
 		fmt.Println("    cur=\"${COMP_WORDS[COMP_CWORD]}\"")
 		fmt.Println("    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
-		fmt.Println("    opts=\"agent install completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --no-tui --help\"")
+		fmt.Println("    opts=\"agent install resume completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --no-tui --help\"")
 		fmt.Println("    if [[ $COMP_CWORD -eq 1 ]]; then")
 		fmt.Println("        COMPREPLY=( $(compgen -W \"${opts}\" -- \"${cur}\" )")
 		fmt.Println("    fi")
@@ -66,7 +66,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("}")
 	case "fish":
 		fmt.Println("# fish completion for eai")
-		fmt.Println("complete -c eai -f -a '(agent install completion help version ask architect plan do code debug orchestrate)'")
+		fmt.Println("complete -c eai -f -a '(agent install resume completion help version ask architect plan do code debug orchestrate)'")
 		fmt.Println("complete -c eai -s h -l help -d 'Show help'")
 		fmt.Println("complete -c eai -s v -l version -d 'Print version'")
 		fmt.Println("complete -c eai -s n -l no-tui -d 'Use simple REPL'")
@@ -153,13 +153,20 @@ func main() {
 				}
 			}
 
-			p := tea.NewProgram(tui.NewMainModel(application, mode))
+			var opts []tea.ProgramOption
+			if cfg.UseAltScreen {
+				opts = append(opts, tea.WithAltScreen())
+			}
+			if cfg.EnableMouse {
+				opts = append(opts, tea.WithMouseCellMotion())
+			}
+			p := tea.NewProgram(tui.NewMainModel(application, mode), opts...)
 			_, err = p.Run()
 			return err
 		},
 	}
 
-	root.Flags().String("mode", "plan", "mode: ask|architect|plan|do|code|debug|orchestrate")
+	root.Flags().String("mode", "plan", "mode: plan|create (TUI), plus ask|architect|do|code|debug|orchestrate")
 	root.Flags().BoolP("no-tui", "n", false, "Use simple REPL instead of TUI")
 	root.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.Flags().BoolP("version", "v", false, "Print version information")
@@ -336,6 +343,63 @@ func main() {
 		},
 	}
 	root.AddCommand(completionCmd)
+
+	resumeCmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Resume a previous chat session in this folder",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath := app.DefaultConfigPath()
+			cfg, err := app.LoadConfig(configPath)
+			if err != nil {
+				return err
+			}
+			// Env overrides (take precedence over config defaults).
+			if v := os.Getenv("MINIMAX_API_KEY"); v != "" {
+				cfg.MinimaxAPIKey = v
+			}
+			if v := os.Getenv("MINIMAX_BASE_URL"); v != "" {
+				cfg.BaseURL = v
+			}
+			if v := os.Getenv("MINIMAX_MODEL"); v != "" {
+				cfg.Model = v
+			}
+			if v := os.Getenv("MINIMAX_MAX_TOKENS"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					cfg.MaxTokens = n
+				}
+			}
+
+			mockMode, _ := cmd.Flags().GetBool("mock")
+			application, err := app.NewApplication(cfg, mockMode)
+			if err != nil {
+				return err
+			}
+
+			modeFlag, _ := cmd.Flags().GetString("mode")
+			mode, ok := app.ParseMode(modeFlag)
+			if !ok {
+				mode, _ = app.ParseMode(cfg.DefaultMode)
+			}
+
+			var opts []tea.ProgramOption
+			if cfg.UseAltScreen {
+				opts = append(opts, tea.WithAltScreen())
+			}
+			if cfg.EnableMouse {
+				opts = append(opts, tea.WithMouseCellMotion())
+			}
+
+			model := tui.NewMainModel(application, mode)
+			model.StartResumePicker()
+
+			p := tea.NewProgram(model, opts...)
+			_, err = p.Run()
+			return err
+		},
+	}
+	resumeCmd.Flags().String("mode", "create", "mode: plan|create")
+	resumeCmd.Flags().Bool("mock", false, "Use mock client (no API calls)")
+	root.AddCommand(resumeCmd)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

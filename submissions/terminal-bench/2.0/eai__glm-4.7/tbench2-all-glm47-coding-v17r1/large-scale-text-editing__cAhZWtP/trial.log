@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'large-scale-text-editing' from /home/jaime/.cache/harbor/tasks/S2VRUfRKCUQ2hWH9KJzsbK/large-scale-text-editing/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: Transform /app/input.csv (1 million rows) to match /app/expected.csv exactly using **keystroke-effic...
+EAI agent completed successfully

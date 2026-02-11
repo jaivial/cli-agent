@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'make-mips-interpreter' from /home/jaime/.cache/harbor/tasks/LeNjAXy6fbV5X852Td8iV9/make-mips-interpreter/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, the corresponding s...
+EAI agent completed successfully

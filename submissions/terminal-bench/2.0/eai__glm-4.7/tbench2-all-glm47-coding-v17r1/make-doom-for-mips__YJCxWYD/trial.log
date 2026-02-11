@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'make-doom-for-mips' from /home/jaime/.cache/harbor/tasks/2gm9aAxh3ufEHTNAcZ8qB3/make-doom-for-mips/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: I have provided /app/doomgeneric/, the source code to doom. I've also wrote a special doomgeneric_im...
+EAI agent completed successfully

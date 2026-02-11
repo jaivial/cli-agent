@@ -1,0 +1,8 @@
+agent_url: "https://github.com/jaivial/cli-agent"
+agent_display_name: "eai"
+agent_org_display_name: "jaivial"
+models:
+  - model_name: "glm-4.7"
+    model_provider: "z-ai"
+    model_display_name: "GLM 4.7"
+    model_org_display_name: "Z-AI"

@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'cobol-modernization' from /home/jaime/.cache/harbor/tasks/SmKKTsxNnHaHqhzng8SrD2/cobol-modernization/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You are given a COBOL program located at /app/src/program.cbl. This program reads input data from /a...
+EAI agent completed successfully

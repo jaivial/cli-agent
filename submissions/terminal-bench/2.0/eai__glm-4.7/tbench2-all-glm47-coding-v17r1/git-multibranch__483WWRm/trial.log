@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'git-multibranch' from /home/jaime/.cache/harbor/tasks/kLfrAkLDVW7LCezLUHt4oB/git-multibranch/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Set up a Git server that hosts a project over SSH at git@localhost:/git/project.
+The server should a...
+EAI agent completed successfully

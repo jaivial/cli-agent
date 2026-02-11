@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'portfolio-optimization' from /home/jaime/.cache/harbor/tasks/79ekQLXanbbMZMfTk3qzaF/portfolio-optimization/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: You have a Python baseline in portfolio_baseline.py that calculates portfolio risk and return using ...
+EAI agent completed successfully

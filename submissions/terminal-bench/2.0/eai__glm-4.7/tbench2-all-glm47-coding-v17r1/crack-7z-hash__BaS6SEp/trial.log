@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'crack-7z-hash' from /home/jaime/.cache/harbor/tasks/MAyhSNHCZegJvZuPyTitjJ/crack-7z-hash/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: You need to create a file called "/app/solution.txt" with the word found in "secret_file.txt" in the...
+EAI agent completed successfully

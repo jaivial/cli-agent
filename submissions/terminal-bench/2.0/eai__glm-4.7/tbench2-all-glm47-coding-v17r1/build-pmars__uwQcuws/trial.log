@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'build-pmars' from /home/jaime/.cache/harbor/tasks/TXGXVihdFyGLhhWJdjKoXE/build-pmars/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Build pMARS (http://www.koth.org/pmars/) from source with no X server. 
+
+Since koth.org is unreliabl...
+EAI agent completed successfully

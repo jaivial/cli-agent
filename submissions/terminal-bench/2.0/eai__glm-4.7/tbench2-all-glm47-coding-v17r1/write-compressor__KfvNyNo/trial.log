@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'write-compressor' from /home/jaime/.cache/harbor/tasks/MWrHdxDHM3npYpRiLMz3iZ/write-compressor/tests
+Preloaded 4 test file(s) into /tests
+Running eai agent with instruction: I have a decompressor in /app/decomp.c. It reads compressed data from stdin and writes the decompres...
+EAI agent completed successfully

@@ -9,6 +9,7 @@ const (
 	ModeAsk         Mode = "ask"         // Ask mode for answering questions
 	ModeArchitect   Mode = "architect"   // Architect mode for high-level design
 	ModePlan        Mode = "plan"        // Plan mode for analyzing projects
+	ModeCreate      Mode = "create"      // Create mode for tool-executing interactive work
 	ModeDo          Mode = "do"          // Do mode for executing tasks
 	ModeCode        Mode = "code"        // Code mode for making changes
 	ModeDebug       Mode = "debug"       // Debug mode for troubleshooting
@@ -24,6 +25,8 @@ func ParseMode(value string) (Mode, bool) {
 		return ModeArchitect, true
 	case string(ModePlan):
 		return ModePlan, true
+	case string(ModeCreate):
+		return ModeCreate, true
 	case string(ModeDo):
 		return ModeDo, true
 	case string(ModeCode):
@@ -39,5 +42,5 @@ func ParseMode(value string) (Mode, bool) {
 
 func IsToolMode(mode Mode) bool {
 	// Modes that allow tool execution
-	return mode == ModeDo || mode == ModeCode || mode == ModeDebug || mode == ModeOrchestrate
+	return mode == ModeCreate || mode == ModeDo || mode == ModeCode || mode == ModeDebug || mode == ModeOrchestrate
 }

@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'schemelike-metacircular-eval' from /home/jaime/.cache/harbor/tasks/YkDjArg6hKdFYEmdiPrztY/schemelike-metacircular-eval/tests
+Preloaded 67 test file(s) into /tests
+Running eai agent with instruction: Write a file eval.scm that is a metacircular evaluator capable of interpreting the scheme-like langu...
+EAI agent completed successfully

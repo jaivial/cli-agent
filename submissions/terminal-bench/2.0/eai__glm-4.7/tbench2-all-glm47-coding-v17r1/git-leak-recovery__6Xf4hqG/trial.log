@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'git-leak-recovery' from /home/jaime/.cache/harbor/tasks/mig33pqGgsU4uNZ5dgPebg/git-leak-recovery/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: A secret was accidentally committed to this repository in /app and then removed by rewriting history...
+EAI agent completed successfully

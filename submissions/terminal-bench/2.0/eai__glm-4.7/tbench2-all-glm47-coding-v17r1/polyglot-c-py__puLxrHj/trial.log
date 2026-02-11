@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'polyglot-c-py' from /home/jaime/.cache/harbor/tasks/mQoDwFSymGYHYWpETANa3y/polyglot-c-py/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Write me a single file in /app/polyglot/main.py.c which is a polyglot, that is, I can run
+
+`python3 ...
+EAI agent completed successfully

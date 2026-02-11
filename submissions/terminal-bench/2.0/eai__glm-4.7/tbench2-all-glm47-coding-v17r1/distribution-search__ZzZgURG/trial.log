@@ -1,0 +1,8 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'distribution-search' from /home/jaime/.cache/harbor/tasks/PBqbNgPwKfCmnNMFQbSbAJ/distribution-search/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Finding a target probability distribution for LLM confidence metrics:
+
+The confidence of a token pre...
+EAI agent completed successfully

@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'llm-inference-batching-scheduler' from /home/jaime/.cache/harbor/tasks/2Fx6Ues7VLnYo5TdH9smXE/llm-inference-batching-scheduler/tests
+Preloaded 4 test file(s) into /tests
+Running eai agent with instruction: In this task you will implement an **LLM inference batching scheduler (shape‑aware)**
+for a static g...
+EAI agent completed successfully

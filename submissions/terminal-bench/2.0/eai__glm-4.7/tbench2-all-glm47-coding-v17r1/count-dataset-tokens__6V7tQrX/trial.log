@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'count-dataset-tokens' from /home/jaime/.cache/harbor/tasks/V8M9GUmT67TmSKo9FQTdoC/count-dataset-tokens/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Tell me how many deepseek tokens are there in the science domain of the ryanmarten/OpenThoughts-1k-s...
+EAI agent completed successfully

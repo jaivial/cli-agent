@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'openssl-selfsigned-cert' from /home/jaime/.cache/harbor/tasks/Skg3RaRNtgRKSRBoJaSgjx/openssl-selfsigned-cert/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Your company needs a self-signed TLS certificate for an internal development server. Create a self-s...
+EAI agent completed successfully

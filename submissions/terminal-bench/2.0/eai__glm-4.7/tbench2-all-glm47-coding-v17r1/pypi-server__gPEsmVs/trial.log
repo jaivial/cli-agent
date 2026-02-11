@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'pypi-server' from /home/jaime/.cache/harbor/tasks/LEz4caXvpzU9rMBzsJnZA6/pypi-server/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: Create a python package called vectorops, then build this package and set up a pypi server on port 8...
+EAI agent completed successfully

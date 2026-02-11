@@ -64,7 +64,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.cfg.MaxTokens = 4096
 			s.cfg.Installed = true
 
-			if err := app.SaveConfig(*s.cfg, ""); err != nil {
+			if err := app.SaveConfig(*s.cfg, app.DefaultConfigPath()); err != nil {
 				s.statusMsg = "failed to save: " + err.Error()
 				return s, nil
 			}

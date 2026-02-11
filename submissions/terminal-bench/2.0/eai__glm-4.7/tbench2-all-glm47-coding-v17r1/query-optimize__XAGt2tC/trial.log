@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'query-optimize' from /home/jaime/.cache/harbor/tasks/55spjFHXbhXqhkHUB3xfBL/query-optimize/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: 
+You are given the Open English Wordnet (OEWN) database in SQLite format, located at /app/oewn.sqlit...
+EAI agent completed successfully

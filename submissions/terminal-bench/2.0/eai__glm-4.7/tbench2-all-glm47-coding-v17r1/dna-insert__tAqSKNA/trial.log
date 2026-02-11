@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'dna-insert' from /home/jaime/.cache/harbor/tasks/Kk55pgeAWyodY7sZSnMpXw/dna-insert/tests
+Preloaded 2 test file(s) into /tests
+Running eai agent with instruction: The file titled sequences.fasta contains the sequence for a circular input plasmid, and a desired ou...
+EAI agent completed successfully

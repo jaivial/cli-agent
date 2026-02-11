@@ -1,0 +1,6 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'circuit-fibsqrt' from /home/jaime/.cache/harbor/tasks/dqWUpJXGGPsFGfnuwx6Car/circuit-fibsqrt/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: The file /app/sim.c is a logic-gate simulator: each line of the file /app/gates.txt should contain a...
+EAI agent completed successfully

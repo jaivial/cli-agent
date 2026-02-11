@@ -17,6 +17,12 @@ type Config struct {
 	DefaultMode       string `yaml:"mode"`
 	SafeMode          bool   `yaml:"safe_mode"`
 	Installed         bool   `yaml:"installed"`
+
+	// TUI / chat UX preferences.
+	ChatVerbosity string `yaml:"chat_verbosity"` // compact|balanced|detailed
+	ShowBanner    bool   `yaml:"show_banner"`
+	EnableMouse   bool   `yaml:"enable_mouse"`
+	UseAltScreen  bool   `yaml:"alt_screen"`
 }
 
 func DefaultConfig() Config {
@@ -30,6 +36,11 @@ func DefaultConfig() Config {
 		DefaultMode:       "plan",
 		SafeMode:          true,
 		Installed:         false,
+
+		ChatVerbosity: "compact",
+		ShowBanner:    false,
+		EnableMouse:   true,
+		UseAltScreen:  true,
 	}
 }
 
@@ -98,6 +109,9 @@ func SaveConfig(cfg Config, path string) error {
 	// Fall back to provided path
 	if path == "" {
 		return errors.New("no path provided for config")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

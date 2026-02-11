@@ -1,0 +1,7 @@
+EAI adapter: /home/jaime/Downloads/projects/cli-agent/eai_agent/agent.py
+EAI agent setup complete
+Preloading /tests for task 'merge-diff-arc-agi-task' from /home/jaime/.cache/harbor/tasks/Q3LDEno2RovPVJEJXuoivq/merge-diff-arc-agi-task/tests
+Preloaded 3 test file(s) into /tests
+Running eai agent with instruction: mkdir /app/repo, then initialize a git repo at /app/repo.
+Fetch the first git bundle located at /app...
+EAI agent completed successfully
