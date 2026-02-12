@@ -9,6 +9,14 @@ import Breeds from './pages/Breeds'
 import Care from './pages/Care'
 import Gallery from './pages/Gallery'
 import About from './pages/About'
+import { CarnivalLayout } from './pages/carnival/components/CarnivalLayout'
+import CarnivalHome from './pages/carnival'
+import CarnivalRoutes from './pages/carnival/CarnivalRoutes'
+import CarnivalSchedule from './pages/carnival/CarnivalSchedule'
+import CarnivalTips from './pages/carnival/CarnivalTips'
+import SambodromoPage from './pages/carnival/SambodromoPage'
+import CentroLapaPage from './pages/carnival/CentroLapaPage'
+import OrlaPage from './pages/carnival/OrlaPage'
 
 function App() {
   return (
@@ -28,7 +36,7 @@ function App() {
               🐱 Cat World
             </motion.h1>
             <ul className="nav-links">
-              {[{path: '/', label: 'Home'}, {path: '/breeds', label: 'Breeds'}, {path: '/care', label: 'Care'}, {path: '/gallery', label: 'Gallery'}, {path: '/about', label: 'About'}].map((item) => (
+              {[{path: '/', label: 'Home'}, {path: '/breeds', label: 'Breeds'}, {path: '/care', label: 'Care'}, {path: '/gallery', label: 'Gallery'}, {path: '/about', label: 'About'}, {path: '/carnival', label: 'Carnival'}].map((item) => (
                 <motion.li
                   key={item.path}
                   whileHover={{ scale: 1.1 }}
@@ -48,6 +56,13 @@ function App() {
               <Route path="/care" element={<Care />} />
               <Route path="/gallery" element={<Gallery />} />
               <Route path="/about" element={<About />} />
+              <Route path="/carnival" element={<CarnivalHome />} />
+              <Route path="/carnival/sambodromo" element={<SambodromoPage />} />
+              <Route path="/carnival/centro-lapa" element={<CentroLapaPage />} />
+              <Route path="/carnival/orla" element={<OrlaPage />} />
+              <Route path="/carnival/routes" element={<CarnivalLayout><CarnivalRoutes /></CarnivalLayout>} />
+              <Route path="/carnival/schedule" element={<CarnivalLayout><CarnivalSchedule /></CarnivalLayout>} />
+              <Route path="/carnival/tips" element={<CarnivalLayout><CarnivalTips /></CarnivalLayout>} />
             </Routes>
           </AnimatePresence>
         </main>

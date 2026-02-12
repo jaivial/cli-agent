@@ -1,6 +1,18 @@
+//go:build !windows
+
 package app
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func resetPermissionProbeCacheForTest() {
+	sudoProbeMu.Lock()
+	sudoProbeAt = time.Time{}
+	sudoProbeCachedOK = false
+	sudoProbeMu.Unlock()
+}
 
 func TestParsePermissionsMode(t *testing.T) {
 	tests := []struct {
@@ -28,22 +40,42 @@ func TestParsePermissionsMode(t *testing.T) {
 }
 
 func TestEffectivePermissionsMode(t *testing.T) {
-	orig := processEUID
-	defer func() { processEUID = orig }()
+	origEUID := processEUID
+	origProbe := probeNonInteractiveSudoFn
+	defer func() {
+		processEUID = origEUID
+		probeNonInteractiveSudoFn = origProbe
+		resetPermissionProbeCacheForTest()
+	}()
 
 	processEUID = func() int { return 1000 }
-	effective, isRoot := EffectivePermissionsMode(PermissionsDangerouslyFullAccess)
-	if isRoot {
-		t.Fatalf("expected non-root state")
+	probeNonInteractiveSudoFn = func() bool { return false }
+	resetPermissionProbeCacheForTest()
+	effective, elevated := EffectivePermissionsMode(PermissionsDangerouslyFullAccess)
+	if elevated {
+		t.Fatalf("expected non-elevated state")
 	}
 	if effective != PermissionsFullAccess {
-		t.Fatalf("non-root dangerous mode should fall back to full-access, got %q", effective)
+		t.Fatalf("dangerous mode without elevation should downgrade to %q, got %q", PermissionsFullAccess, effective)
+	}
+
+	processEUID = func() int { return 1000 }
+	probeNonInteractiveSudoFn = func() bool { return true }
+	resetPermissionProbeCacheForTest()
+	effective, elevated = EffectivePermissionsMode(PermissionsDangerouslyFullAccess)
+	if !elevated {
+		t.Fatalf("expected elevated state when sudo -n is available")
+	}
+	if effective != PermissionsDangerouslyFullAccess {
+		t.Fatalf("dangerous mode with elevation should stay %q, got %q", PermissionsDangerouslyFullAccess, effective)
 	}
 
 	processEUID = func() int { return 0 }
-	effective, isRoot = EffectivePermissionsMode(PermissionsDangerouslyFullAccess)
-	if !isRoot {
-		t.Fatalf("expected root state")
+	probeNonInteractiveSudoFn = func() bool { return false }
+	resetPermissionProbeCacheForTest()
+	effective, elevated = EffectivePermissionsMode(PermissionsDangerouslyFullAccess)
+	if !elevated {
+		t.Fatalf("expected elevated state for root")
 	}
 	if effective != PermissionsDangerouslyFullAccess {
 		t.Fatalf("root dangerous mode should be effective, got %q", effective)

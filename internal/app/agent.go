@@ -448,6 +448,9 @@ type AgentLoop struct {
 	// the current user task. This is used by the TUI to provide lightweight
 	// "memory" without changing the agent system prompt.
 	PreludeMessages []AgentMessage
+	// PermissionsMode controls approval behavior for risky actions and elevation retries.
+	PermissionsMode     string
+	PermissionDecisions <-chan PermissionDecision
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -466,12 +469,13 @@ func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *
 		}
 	}
 	return &AgentLoop{
-		Client:   client,
-		Tools:    DefaultTools(),
-		MaxLoops: maxLoops,
-		StateDir: stateDir,
-		WorkDir:  workDir,
-		Logger:   logger,
+		Client:          client,
+		Tools:           DefaultTools(),
+		MaxLoops:        maxLoops,
+		StateDir:        stateDir,
+		WorkDir:         workDir,
+		Logger:          logger,
+		PermissionsMode: PermissionsFullAccess,
 	}
 }
 
@@ -672,6 +676,7 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 		l.Logger.Error("Terminal-bench fastpath failed", map[string]interface{}{
 			"error": err.Error(),
 		})
+		l.emitProgress(ProgressEvent{Kind: "error", Text: "Terminal-bench fastpath failed"})
 	} else if ok {
 		state.Completed = true
 		state.FinalOutput = "TASK_COMPLETED"
@@ -721,6 +726,8 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 	consecutiveNoAction := 0
 	maxNoActionAttempts := 10
 	apiErrorStreak := 0
+	truncationContinueAttempts := 0
+	maxTruncationContinueAttempts := 2
 
 loop:
 	for state.Iteration < l.MaxLoops {
@@ -730,7 +737,7 @@ loop:
 			l.emitProgress(ProgressEvent{Kind: "thinking", Text: "Planning approach"})
 		}
 
-		response, err := l.Client.CompleteWithObserver(ctx, l.buildPrompt(state.Messages), func(reasoning string) {
+		response, meta, err := l.Client.CompleteWithObserverMeta(ctx, l.buildPrompt(state.Messages), func(reasoning string) {
 			reasoning = strings.TrimSpace(reasoning)
 			if reasoning == "" {
 				return
@@ -744,6 +751,7 @@ loop:
 			l.Logger.Error("Failed to get model response", map[string]interface{}{
 				"error": err.Error(),
 			})
+			l.emitProgress(ProgressEvent{Kind: "error", Text: "Failed to get model response"})
 			// Permanent misconfiguration: stop early with a clear error.
 			if isLikelyConfigError(err) || ctx.Err() != nil {
 				state.Messages = append(state.Messages, AgentMessage{
@@ -815,23 +823,31 @@ loop:
 			}
 		}
 
-		// Check for truncation if no tool calls found
-		if len(toolCalls) == 0 && isResponseTruncated(response) {
+		finishReason := strings.ToLower(strings.TrimSpace(meta.FinishReason))
+		truncated := len(toolCalls) == 0 && (finishReason == "length" || isResponseTruncated(response))
+		if truncated {
 			l.Logger.Warn("Response appears truncated", map[string]interface{}{
 				"response_length": len(response),
+				"finish_reason":   meta.FinishReason,
 			})
+			l.emitProgress(ProgressEvent{Kind: "warn", Text: "Response appears truncated"})
 
-			// If we see a partial tool call, prompt for continuation
-			if strings.Contains(response, `"tool"`) || strings.Contains(response, `"write_file"`) || strings.Contains(response, `"exec"`) {
-				promptMsg := AgentMessage{
-					Role:      "user",
-					Content:   "Your response was truncated. Please provide ONLY the tool call JSON without explanation. Keep file content SHORT. Format: {\"tool\": \"write_file\", \"args\": {\"path\": \"/app/file.py\", \"content\": \"short content\"}}",
-					Timestamp: time.Now(),
+			if truncationContinueAttempts < maxTruncationContinueAttempts {
+				truncationContinueAttempts++
+				needsToolJSON := strings.Contains(response, `"tool"`) || strings.Contains(response, `"tool_calls"`) || strings.Contains(response, `"write_file"`) || strings.Contains(response, `"exec"`)
+				prompt := "Your previous response was truncated. Continue exactly where you left off. Do not repeat earlier content."
+				if needsToolJSON {
+					prompt += " IMPORTANT: Output ONLY the complete valid JSON tool call (no prose, no backticks)."
+				} else {
+					prompt += " If you were writing a final report, continue and finish cleanly."
 				}
+				promptMsg := AgentMessage{Role: "user", Content: prompt, Timestamp: time.Now()}
 				state.Messages = append(state.Messages, promptMsg)
 				state.Iteration++
 				continue
 			}
+		} else {
+			truncationContinueAttempts = 0
 		}
 
 		if len(toolCalls) == 0 {
@@ -862,6 +878,7 @@ loop:
 							"missing":  missing,
 							"existing": existing,
 						})
+						l.emitProgress(ProgressEvent{Kind: "warn", Text: "Task claims complete but expected files missing"})
 						// Prompt the model to create missing files
 						promptMsg := AgentMessage{
 							Role:      "user",
@@ -938,6 +955,7 @@ loop:
 				l.Logger.Warn("Too many consecutive no-action responses", map[string]interface{}{
 					"attempts": consecutiveNoAction,
 				})
+				l.emitProgress(ProgressEvent{Kind: "warn", Text: "Too many consecutive no-action responses"})
 				state.FinalOutput = "Model did not return any tool calls after repeated prompts"
 				break
 			}
@@ -983,6 +1001,15 @@ loop:
 		consecutiveNoAction = 0
 
 		for _, call := range toolCalls {
+			if needs, actionText, path, command := l.toolNeedsPermissionApproval(call); needs {
+				if ok := l.requestPermissionApproval(ctx, call, actionText, path, command); !ok {
+					state.FinalOutput = "Permission denied. Agent stopped; waiting for new instructions."
+					state.EndedAt = time.Now()
+					l.saveState(state)
+					return state, nil
+				}
+			}
+
 			result := l.executeToolWithProgress(ctx, call)
 			state.Results = append(state.Results, result)
 
@@ -1325,6 +1352,260 @@ func (l *AgentLoop) toolProgressDetails(call ToolCall) (path, command string) {
 		path = strings.TrimSpace(args.Path)
 	}
 	return path, command
+}
+
+func summarizeForApproval(input string, max int) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	input = strings.ReplaceAll(input, "\r", " ")
+	input = strings.ReplaceAll(input, "\n", " ")
+	input = strings.Join(strings.Fields(input), " ")
+	if max <= 0 || len(input) <= max {
+		return input
+	}
+	if max <= 3 {
+		return input[:max]
+	}
+	return strings.TrimSpace(input[:max-3]) + "..."
+}
+
+func execCommandNeedsApproval(command string) bool {
+	cmd := strings.ToLower(strings.TrimSpace(command))
+	cmd = strings.ReplaceAll(cmd, "\r", " ")
+	cmd = strings.ReplaceAll(cmd, "\n", " ")
+	cmd = strings.Join(strings.Fields(cmd), " ")
+	if cmd == "" {
+		return false
+	}
+
+	// Heuristic: ask before privileged/destructive/system-level commands.
+	dangerous := []string{
+		"sudo ", "sudo	", "sudo-", " su ", "pkexec ", "doas ", "runas ",
+		"rm -rf", "rm -fr", "rm -r ", "rm -r/", "rm -r.", "rm -r..", "rmdir /s", "del /s", "del /q", "format ", "mkfs", "dd if=",
+		"git reset --hard", "git clean -fd", "git clean -ff", "git checkout --",
+		"systemctl ", "service ", "launchctl ", "sc ", "net stop", "net start", "shutdown", "reboot", "poweroff", "halt",
+		"chmod ", "chown ", "setfacl ", "icacls ",
+		"apt-get ", "apt ", "yum ", "dnf ", "pacman ", "brew ", "winget ", "choco ",
+		"/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/library/", "/applications/", "c:\\windows", "hklm\\",
+	}
+	for _, needle := range dangerous {
+		if strings.Contains(cmd, needle) {
+			return true
+		}
+	}
+
+	// Common "curl | sh" install patterns.
+	if (strings.Contains(cmd, "curl ") || strings.Contains(cmd, "wget ")) && strings.Contains(cmd, "|") {
+		if strings.Contains(cmd, "| sh") || strings.Contains(cmd, "|bash") || strings.Contains(cmd, "| bash") || strings.Contains(cmd, "| zsh") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isPathOutsideWorkDir(workDir, absPath string) bool {
+	workDir = strings.TrimSpace(workDir)
+	absPath = strings.TrimSpace(absPath)
+	if workDir == "" || absPath == "" {
+		return true
+	}
+	wd := filepath.Clean(workDir)
+	p := filepath.Clean(absPath)
+	rel, err := filepath.Rel(wd, p)
+	if err != nil {
+		return true
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." {
+		return false
+	}
+	if rel == ".." {
+		return true
+	}
+	prefix := ".." + string(filepath.Separator)
+	return strings.HasPrefix(rel, prefix)
+}
+
+func (l *AgentLoop) toolNeedsPermissionApproval(call ToolCall) (needs bool, actionText string, path string, command string) {
+	// In full-access mode, ask the user before executing risky actions. In
+	// dangerously-full-access, auto-allow everything.
+	if NormalizePermissionsMode(l.PermissionsMode) != PermissionsFullAccess {
+		return false, "", "", ""
+	}
+	if l.PermissionDecisions == nil {
+		return false, "", "", ""
+	}
+
+	path, command = l.toolProgressDetails(call)
+
+	switch call.Name {
+	case "exec":
+		if execCommandNeedsApproval(command) {
+			actionText = "EAI agent wants to run: " + summarizeForApproval(command, 140)
+			if strings.TrimSpace(path) != "" {
+				actionText += " (cwd: " + summarizeForApproval(path, 60) + ")"
+			}
+			return true, actionText, path, command
+		}
+
+	case "read_file":
+		if strings.TrimSpace(path) == "" {
+			return false, "", "", ""
+		}
+		abs := l.resolvePath(path)
+		if isPathOutsideWorkDir(l.WorkDir, abs) {
+			actionText = "EAI agent wants to read: " + summarizeForApproval(abs, 160)
+			return true, actionText, abs, ""
+		}
+
+	case "write_file", "edit_file", "append_file", "patch_file":
+		if strings.TrimSpace(path) == "" {
+			return false, "", "", ""
+		}
+		abs := l.resolvePath(path)
+		if isPathOutsideWorkDir(l.WorkDir, abs) {
+			actionText = "EAI agent wants to modify: " + summarizeForApproval(abs, 160)
+			return true, actionText, abs, ""
+		}
+	}
+
+	return false, "", "", ""
+}
+
+func (l *AgentLoop) requestPermissionApproval(ctx context.Context, call ToolCall, actionText, path, command string) bool {
+	actionText = strings.TrimSpace(actionText)
+	if actionText == "" {
+		actionText = "EAI agent requests permission."
+	}
+
+	l.emitProgress(ProgressEvent{
+		Kind:       "permission_request",
+		Text:       actionText,
+		Tool:       call.Name,
+		ToolCallID: call.ID,
+		Path:       strings.TrimSpace(path),
+		Command:    strings.TrimSpace(command),
+	})
+
+	// If we're not wired up to a UI prompt, default to allow.
+	if l.PermissionDecisions == nil {
+		return true
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case dec, ok := <-l.PermissionDecisions:
+			if !ok {
+				return false
+			}
+			if strings.TrimSpace(dec.ToolCallID) != strings.TrimSpace(call.ID) {
+				continue
+			}
+			if !dec.Allow {
+				l.emitProgress(ProgressEvent{Kind: "warn", Text: "Permission denied; stopping agent"})
+			}
+			return dec.Allow
+		}
+	}
+}
+
+func commandContainsSudo(command string) bool {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" {
+		return false
+	}
+	// Keep this cheap: detect obvious sudo invocations in shell command chains.
+	if strings.HasPrefix(command, "sudo ") || strings.Contains(command, " sudo ") {
+		return true
+	}
+	if strings.Contains(command, "&&sudo ") || strings.Contains(command, "||sudo ") || strings.Contains(command, ";sudo ") || strings.Contains(command, "|sudo ") {
+		return true
+	}
+	return false
+}
+
+func isPermissionDeniedFailure(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(string(output)))
+	if e := strings.TrimSpace(err.Error()); e != "" {
+		if text != "" {
+			text += "\n"
+		}
+		text += strings.ToLower(e)
+	}
+	markers := []string{
+		"permission denied",
+		"operation not permitted",
+		"access is denied",
+		"access denied",
+		"eacces",
+		"requires elevated",
+		"must be superuser",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSudoAuthenticationFailure(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(string(output)))
+	if e := strings.TrimSpace(err.Error()); e != "" {
+		if text != "" {
+			text += "\n"
+		}
+		text += strings.ToLower(e)
+	}
+	markers := []string{
+		"sudo: a password is required",
+		"no tty present",
+		"a terminal is required",
+		"sorry, try again",
+		"sudo: a password",
+		"askpass",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runShellCommand(ctx context.Context, shell string, shellArgs []string, dir string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, shell, shellArgs...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	return cmd.CombinedOutput()
+}
+
+func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []string, dir string) (output []byte, err error, attempted bool) {
+	if IsProcessRoot() {
+		return nil, nil, false
+	}
+	if _, lookErr := exec.LookPath("sudo"); lookErr != nil {
+		return nil, nil, false
+	}
+	sudoArgs := append([]string{"-n", shell}, shellArgs...)
+	cmd := exec.CommandContext(ctx, "sudo", sudoArgs...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	out, runErr := cmd.CombinedOutput()
+	return out, runErr, true
 }
 
 func (l *AgentLoop) emitToolProgress(call ToolCall, status string, durationMs int64, errText string) {
@@ -2249,14 +2530,34 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			shell = "sh"
 			shellArgs = []string{"-c", args.Command}
 		}
-		cmd := exec.CommandContext(ctx, shell, shellArgs...)
+
+		runDir := ""
 		if args.Cwd != "" {
-			cmd.Dir = l.resolvePath(args.Cwd)
+			runDir = l.resolvePath(args.Cwd)
 		} else if l.WorkDir != "" {
-			cmd.Dir = l.WorkDir
+			runDir = l.WorkDir
 		}
-		output, err := cmd.CombinedOutput()
-		if err != nil {
+
+		output, err := runShellCommand(ctx, shell, shellArgs, runDir)
+
+		// In dangerously-full-access mode, retry permission failures with
+		// non-interactive sudo when possible.
+		if err != nil &&
+			NormalizePermissionsMode(l.PermissionsMode) == PermissionsDangerouslyFullAccess &&
+			!commandContainsSudo(args.Command) &&
+			isPermissionDeniedFailure(err, output) {
+
+			sudoOutput, sudoErr, attempted := runShellCommandWithSudo(ctx, shell, shellArgs, runDir)
+			if attempted {
+				output = sudoOutput
+				err = sudoErr
+				if sudoErr != nil && isSudoAuthenticationFailure(sudoErr, sudoOutput) {
+					result.Error = "elevation failed: sudo requires cached/passwordless auth. Run `sudo -v` (or relaunch as root/admin) and retry."
+				}
+			}
+		}
+
+		if err != nil && strings.TrimSpace(result.Error) == "" {
 			result.Error = err.Error()
 		}
 		result.Output = truncateToolOutput(string(output))

@@ -55,6 +55,8 @@ func (m helpModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(helpDescriptionStyle.Render("  /permissions  show or set permissions mode"))
 	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("  /logs    show recent warn/error logs"))
+	b.WriteString("\n")
 
 	b.WriteString("\n")
 	b.WriteString(helpFooterStyle.Render("shift+q quit | esc cancel | enter send"))

@@ -21,6 +21,9 @@ func tuiErrorLogPath() string {
 	if p := strings.TrimSpace(os.Getenv("EAI_TUI_ERROR_LOG")); p != "" {
 		return p
 	}
+	if len(os.Args) > 0 && strings.HasSuffix(os.Args[0], ".test") {
+		return filepath.Join(os.TempDir(), "cli-agent", "error.test.log")
+	}
 	cfgPath := app.DefaultConfigPath()
 	if strings.TrimSpace(cfgPath) == "" {
 		return filepath.Join(os.TempDir(), "cli-agent", "error.log")

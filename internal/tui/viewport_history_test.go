@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"cli-agent/internal/app"
@@ -115,6 +116,26 @@ func TestModelPickerCommandAndSelection(t *testing.T) {
 	}
 }
 
+func TestModelPickerSupportsShiftArrowNavigation(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+	m = applyWindowSize(t, m)
+
+	m = sendEnter(t, m, "/model")
+	if !m.modelPickerActive {
+		t.Fatalf("expected model picker to open after /model")
+	}
+
+	m = pressKey(t, m, tea.KeyShiftDown)
+	if m.modelPickerIndex != 1 {
+		t.Fatalf("expected picker index 1 after shift+down, got %d", m.modelPickerIndex)
+	}
+
+	m = pressKey(t, m, tea.KeyShiftUp)
+	if m.modelPickerIndex != 0 {
+		t.Fatalf("expected picker index 0 after shift+up, got %d", m.modelPickerIndex)
+	}
+}
+
 func TestQueueUserTurnWhileAgentRunning(t *testing.T) {
 	m := NewMainModel(nil, app.ModeCreate)
 	m = applyWindowSize(t, m)
@@ -176,5 +197,19 @@ func TestPermissionsPickerCommandAndSelection(t *testing.T) {
 	last := m.messages[len(m.messages)-1]
 	if last.Content != "permissions set to dangerously-full-access" {
 		t.Fatalf("unexpected final message: %q", last.Content)
+	}
+}
+
+func TestTextareaHasNoHardCharLimit(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+
+	if m.input.CharLimit != 0 {
+		t.Fatalf("expected unlimited textarea char limit, got %d", m.input.CharLimit)
+	}
+
+	input := strings.Repeat("x", 12000)
+	m.input.SetValue(input)
+	if got := len([]rune(m.input.Value())); got != len([]rune(input)) {
+		t.Fatalf("expected input length %d, got %d", len([]rune(input)), got)
 	}
 }

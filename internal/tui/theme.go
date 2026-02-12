@@ -24,6 +24,7 @@ const (
 	colorSuccess   = "#30D158"
 	colorWarning   = "#FF9F0A"
 	colorError     = "#FF453A"
+	colorErrorDark = "#D70000"
 	colorPurple    = "#BF5AF2"
 	colorPink      = "#FF2D55"
 	colorScrollbar = "#5A5A5E"

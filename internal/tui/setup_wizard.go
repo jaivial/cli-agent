@@ -126,7 +126,9 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Save config and apply selected provider/mode.
 				s.cfg.APIKey = s.apiKey
 				s.cfg.Model = app.DefaultModel
-				s.cfg.MaxTokens = 4096
+				if s.cfg.MaxTokens <= 0 {
+					s.cfg.MaxTokens = app.DefaultConfig().MaxTokens
+				}
 				s.cfg.Installed = true
 
 				if s.selectedProvider() == providerZAI {
@@ -261,7 +263,12 @@ func (s *SetupWizard) View() string {
 
 	b.WriteString(hintStyle.Render("↑/↓ choose • enter next/save • esc back/cancel"))
 
-	return b.String()
+	out := b.String()
+	if s.width > 0 && s.height > 0 {
+		// Fill the screen to avoid redraw artifacts when switching between steps.
+		return lipgloss.Place(s.width, s.height, lipgloss.Left, lipgloss.Top, out)
+	}
+	return out
 }
 
 func (s *SetupWizard) Done() bool {

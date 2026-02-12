@@ -25,6 +25,10 @@ type MinimaxClient struct {
 
 var ErrAPIKeyRequired = errors.New("api key is required")
 
+type CompletionMeta struct {
+	FinishReason string
+}
+
 // Z.ai is compatible with an OpenAI-style /chat/completions API.
 // Docs: https://docs.z.ai/api-reference/llm/chat-completion.md
 type zaiChatCompletionRequest struct {
@@ -113,13 +117,19 @@ func (c *MinimaxClient) Complete(ctx context.Context, prompt string) (string, er
 }
 
 func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
+	out, _, err := c.CompleteWithObserverMeta(ctx, prompt, onReasoning)
+	return out, err
+}
+
+func (c *MinimaxClient) CompleteWithObserverMeta(ctx context.Context, prompt string, onReasoning func(string)) (string, CompletionMeta, error) {
 	// Mock mode check
 	if c.APIKey == "mock" || c.BaseURL == "mock://" {
-		return c.mockComplete(ctx, prompt)
+		out, err := c.mockComplete(ctx, prompt)
+		return out, CompletionMeta{FinishReason: "stop"}, err
 	}
 
 	if c.APIKey == "" {
-		return "", ErrAPIKeyRequired
+		return "", CompletionMeta{}, ErrAPIKeyRequired
 	}
 
 	maxRetries := 2
@@ -139,10 +149,11 @@ func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string,
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return "", CompletionMeta{}, ctx.Err()
 		}
 
 		var out string
+		var meta CompletionMeta
 		var err error
 
 		reqCtx := ctx
@@ -152,13 +163,13 @@ func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string,
 		}
 
 		// Z.AI: /chat/completions (OpenAI-style)
-		out, err = c.completeZAiChatCompletions(reqCtx, prompt, onReasoning)
+		out, meta, err = c.completeZAiChatCompletionsMeta(reqCtx, prompt, onReasoning)
 		if cancel != nil {
 			cancel()
 		}
 
 		if err == nil {
-			return out, nil
+			return out, meta, nil
 		}
 		lastErr = err
 		if attempt == maxRetries || !isRetryableLLMError(err) {
@@ -170,7 +181,7 @@ func (c *MinimaxClient) CompleteWithObserver(ctx context.Context, prompt string,
 		}
 		time.Sleep(backoff)
 	}
-	return "", lastErr
+	return "", CompletionMeta{}, lastErr
 }
 
 func isRetryableLLMError(err error) bool {
@@ -213,6 +224,11 @@ func zaiChatCompletionsURL(baseURL string) string {
 }
 
 func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt string, onReasoning func(string)) (string, error) {
+	out, _, err := c.completeZAiChatCompletionsMeta(ctx, prompt, onReasoning)
+	return out, err
+}
+
+func (c *MinimaxClient) completeZAiChatCompletionsMeta(ctx context.Context, prompt string, onReasoning func(string)) (string, CompletionMeta, error) {
 	url := zaiChatCompletionsURL(c.BaseURL)
 	reqBody := zaiChatCompletionRequest{
 		Model:       c.Model,
@@ -224,12 +240,12 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return "", CompletionMeta{}, err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return "", err
+		return "", CompletionMeta{}, err
 	}
 	request.Header.Set("Authorization", "Bearer "+c.APIKey)
 	request.Header.Set("Content-Type", "application/json")
@@ -237,20 +253,20 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 
 	resp, err := c.HTTP.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("api request failed: %v", err)
+		return "", CompletionMeta{}, fmt.Errorf("api request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %v", err)
+		return "", CompletionMeta{}, fmt.Errorf("failed to read response: %v", err)
 	}
 
 	if resp.StatusCode >= 300 {
 		// Try OpenAI-style error first.
 		var openaiErr zaiChatCompletionResponse
 		if err := json.Unmarshal(bodyBytes, &openaiErr); err == nil && openaiErr.Error != nil && openaiErr.Error.Message != "" {
-			return "", fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, openaiErr.Error.Message)
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, openaiErr.Error.Message)
 		}
 
 		// Try {code,message,data} wrapper style.
@@ -263,28 +279,31 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 		}
 		if err := json.Unmarshal(bodyBytes, &wrapped); err == nil {
 			if wrapped.Error != nil && wrapped.Error.Message != "" {
-				return "", fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Error.Message)
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Error.Message)
 			}
 			if wrapped.Message != "" {
-				return "", fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Message)
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Message)
 			}
 		}
 
-		return "", fmt.Errorf("z.ai api error: status %d, response: %s", resp.StatusCode, string(bodyBytes))
+		if msg := extractErrorMessageFromBody(bodyBytes); msg != "" {
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, msg)
+		}
+		return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d", resp.StatusCode)
 	}
 
 	// First try direct OpenAI-style response.
 	var respDirect zaiChatCompletionResponse
 	if err := json.Unmarshal(bodyBytes, &respDirect); err == nil {
 		if respDirect.Error != nil {
-			return "", fmt.Errorf("z.ai api error: %s", respDirect.Error.Message)
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respDirect.Error.Message)
 		}
-		content, reasoning := extractZAiChoiceContent(respDirect.Choices)
+		content, reasoning, finishReason := extractZAiChoiceContentMeta(respDirect.Choices)
 		if onReasoning != nil && strings.TrimSpace(reasoning) != "" {
 			onReasoning(reasoning)
 		}
 		if content != "" {
-			return content, nil
+			return content, CompletionMeta{FinishReason: finishReason}, nil
 		}
 	}
 
@@ -297,24 +316,28 @@ func (c *MinimaxClient) completeZAiChatCompletions(ctx context.Context, prompt s
 	}
 	if err := json.Unmarshal(bodyBytes, &respWrapped); err == nil {
 		if respWrapped.Error != nil && respWrapped.Error.Message != "" {
-			return "", fmt.Errorf("z.ai api error: %s", respWrapped.Error.Message)
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respWrapped.Error.Message)
 		}
 		if respWrapped.Data.Error != nil && respWrapped.Data.Error.Message != "" {
-			return "", fmt.Errorf("z.ai api error: %s", respWrapped.Data.Error.Message)
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respWrapped.Data.Error.Message)
 		}
-		content, reasoning := extractZAiChoiceContent(respWrapped.Data.Choices)
+		content, reasoning, finishReason := extractZAiChoiceContentMeta(respWrapped.Data.Choices)
 		if onReasoning != nil && strings.TrimSpace(reasoning) != "" {
 			onReasoning(reasoning)
 		}
 		if content != "" {
-			return content, nil
+			return content, CompletionMeta{FinishReason: finishReason}, nil
 		}
 		if respWrapped.Message != "" && respWrapped.Code != 0 {
-			return "", fmt.Errorf("z.ai api error: code %d, message: %s", respWrapped.Code, respWrapped.Message)
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: code %d, message: %s", respWrapped.Code, respWrapped.Message)
 		}
 	}
 
-	return "", fmt.Errorf("invalid z.ai api response format: %s", string(bodyBytes))
+	// Avoid dumping raw JSON into the TUI error line.
+	if summary := summarizeResponseBody(bodyBytes, 240); summary != "" && !strings.HasPrefix(summary, "{") && !strings.HasPrefix(summary, "[") {
+		return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format: %s", summary)
+	}
+	return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format")
 }
 
 func extractZAiChoiceContent(choices []zaiChatCompletionChoice) (content string, reasoning string) {
@@ -337,6 +360,101 @@ func extractZAiChoiceContent(choices []zaiChatCompletionChoice) (content string,
 		}
 	}
 	return "", reasoning
+}
+
+func extractZAiChoiceContentMeta(choices []zaiChatCompletionChoice) (content string, reasoning string, finishReason string) {
+	firstFinish := ""
+	for _, ch := range choices {
+		fr := strings.TrimSpace(ch.FinishReason)
+		if firstFinish == "" && fr != "" {
+			firstFinish = fr
+		}
+		if ch.Message != nil {
+			if reasoning == "" && strings.TrimSpace(ch.Message.ReasoningContent) != "" {
+				reasoning = ch.Message.ReasoningContent
+			}
+			if strings.TrimSpace(ch.Message.Content) != "" {
+				if fr == "" {
+					fr = firstFinish
+				}
+				return ch.Message.Content, reasoning, fr
+			}
+		}
+		if ch.Delta != nil {
+			if reasoning == "" && strings.TrimSpace(ch.Delta.ReasoningContent) != "" {
+				reasoning = ch.Delta.ReasoningContent
+			}
+			if strings.TrimSpace(ch.Delta.Content) != "" {
+				if fr == "" {
+					fr = firstFinish
+				}
+				return ch.Delta.Content, reasoning, fr
+			}
+		}
+	}
+	return "", reasoning, firstFinish
+}
+
+func extractErrorMessageFromBody(body []byte) string {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		// non-JSON errors can be returned as plain text.
+		summary := summarizeResponseBody(body, 200)
+		if summary != "" && !strings.HasPrefix(summary, "{") && !strings.HasPrefix(summary, "[") {
+			return summary
+		}
+		return ""
+	}
+
+	// Common fields.
+	keys := []string{"message", "msg", "detail", "error_description", "errorMessage", "error_message"}
+	for _, k := range keys {
+		if s, ok := obj[k].(string); ok {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				return s
+			}
+		}
+	}
+
+	// Nested error.
+	if ev, ok := obj["error"]; ok {
+		switch t := ev.(type) {
+		case map[string]interface{}:
+			for _, k := range keys {
+				if s, ok := t[k].(string); ok {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						return s
+					}
+				}
+			}
+		case string:
+			s := strings.TrimSpace(t)
+			if s != "" {
+				return s
+			}
+		}
+	}
+
+	return ""
+}
+
+func summarizeResponseBody(body []byte, maxLen int) string {
+	s := strings.TrimSpace(string(body))
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if maxLen <= 0 {
+		maxLen = 240
+	}
+	if len(s) > maxLen {
+		if maxLen <= 3 {
+			return s[:maxLen]
+		}
+		s = s[:maxLen-3] + "..."
+	}
+	return s
 }
 
 // mockComplete simulates API responses for testing

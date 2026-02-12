@@ -15,7 +15,9 @@ type slashPopupItem struct {
 	InsertText  string
 }
 
-func (m *MainModel) updateSlashPopupState() {
+func (m *MainModel) updateSlashPopupState() (heightChanged bool) {
+	prevHeight := m.slashPopupHeight
+
 	key, items := m.slashPopupState()
 	if key != m.slashPopupKey {
 		m.slashPopupKey = key
@@ -23,7 +25,8 @@ func (m *MainModel) updateSlashPopupState() {
 	}
 	if len(items) == 0 {
 		m.slashPopupIndex = 0
-		return
+		m.slashPopupHeight = 0
+		return prevHeight != 0
 	}
 	if m.slashPopupIndex < 0 {
 		m.slashPopupIndex = 0
@@ -31,6 +34,11 @@ func (m *MainModel) updateSlashPopupState() {
 	if m.slashPopupIndex >= len(items) {
 		m.slashPopupIndex = len(items) - 1
 	}
+
+	// Height is stable because we truncate lines rather than wrapping:
+	// border (2) + header (2) + items.
+	m.slashPopupHeight = len(items) + 4
+	return m.slashPopupHeight != prevHeight
 }
 
 func (m *MainModel) slashPopupItems() []slashPopupItem {
@@ -39,7 +47,7 @@ func (m *MainModel) slashPopupItems() []slashPopupItem {
 }
 
 func (m *MainModel) slashPopupState() (key string, items []slashPopupItem) {
-	if m.modelPickerActive || m.permissionsPickerActive || m.resumePickerActive || m.planDecisionActive {
+	if m.modelPickerActive || m.permissionsPickerActive || m.resumePickerActive || m.planDecisionActive || m.permissionDecisionActive {
 		return "", nil
 	}
 
@@ -71,6 +79,7 @@ func (m *MainModel) slashPopupState() (key string, items []slashPopupItem) {
 		{Label: "/new", Description: "start a new session", InsertText: "/new"},
 		{Label: "/clear", Description: "clear chat (alias: /new)", InsertText: "/clear"},
 		{Label: "/connect", Description: "setup provider + API key", InsertText: "/connect"},
+		{Label: "/logs", Description: "show recent warn/error logs", InsertText: "/logs"},
 		{Label: "/model", Description: "choose model", InsertText: "/model"},
 		{Label: "/resume", Description: "resume a previous session", InsertText: "/resume"},
 		{Label: "/permissions", Description: "show/set permissions mode", InsertText: "/permissions"},
@@ -99,8 +108,8 @@ func (m *MainModel) slashPopupState() (key string, items []slashPopupItem) {
 			value string
 			desc  string
 		}{
-			{value: app.PermissionsFullAccess, desc: "default"},
-			{value: app.PermissionsDangerouslyFullAccess, desc: "requires root"},
+			{value: app.PermissionsFullAccess, desc: "prompt before risky actions"},
+			{value: app.PermissionsDangerouslyFullAccess, desc: "run directly; auto-elevate on permission errors"},
 		}
 		for _, opt := range opts {
 			if argPrefix == "" || strings.HasPrefix(strings.ToLower(opt.value), argPrefix) {
@@ -136,13 +145,16 @@ func (m *MainModel) renderSlashPopup() string {
 
 	width := m.chatAreaWidth() - 2
 	if width < 24 {
-		width = m.chatAreaWidth()
+		width = 24
+		if maxWidth := m.chatAreaWidth() - 2; width > maxWidth {
+			width = maxWidth
+		}
 	}
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("commands"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("↑/↓ select • enter complete"))
+	b.WriteString(hintStyle.Render("↑/↓ select • tab complete • enter run"))
 	b.WriteString("\n")
 
 	labelW := 14

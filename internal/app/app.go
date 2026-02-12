@@ -23,7 +23,7 @@ type Application struct {
 }
 
 func NewApplication(cfg Config, mockMode bool) (*Application, error) {
-	logger := NewLogger(os.Stdout)
+	logger := NewLogger(DefaultLogWriter())
 
 	var client *MinimaxClient
 	if mockMode {
@@ -831,6 +831,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 
 		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 		agent := NewAgentLoop(a.Client, 12, stateDir, a.Logger)
+		agent.PermissionsMode = a.Config.Permissions
 		if wd, err := os.Getwd(); err == nil && wd != "" {
 			agent.WorkDir = wd
 		}
@@ -886,13 +887,13 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 // but returns a chat-friendly final text. This is used by the TUI "chat" so we can keep
 // the agent's prompt/behavior identical to Terminal-Bench runs while streaming progress.
 func (a *Application) ExecuteAgentTaskWithProgressEvents(ctx context.Context, task string, progress func(ProgressEvent)) (string, error) {
-	return a.ExecuteAgentTaskInSessionWithProgressEvents(ctx, "", "", task, progress)
+	return a.ExecuteAgentTaskInSessionWithProgressEvents(ctx, "", "", task, progress, nil)
 }
 
 // ExecuteAgentTaskInSessionWithProgressEvents runs the tool agent with lightweight
 // session memory (recent turns + optional summary) injected ahead of the current task.
 // This is only used by the interactive TUI and does not affect `eai agent`.
-func (a *Application) ExecuteAgentTaskInSessionWithProgressEvents(ctx context.Context, sessionID string, workDir string, task string, progress func(ProgressEvent)) (string, error) {
+func (a *Application) ExecuteAgentTaskInSessionWithProgressEvents(ctx context.Context, sessionID string, workDir string, task string, progress func(ProgressEvent), decisions <-chan PermissionDecision) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("application is nil")
 	}
@@ -920,6 +921,8 @@ func (a *Application) ExecuteAgentTaskInSessionWithProgressEvents(ctx context.Co
 
 	stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 	agent := NewAgentLoop(a.Client, 30, stateDir, a.Logger)
+	agent.PermissionsMode = a.Config.Permissions
+	agent.PermissionDecisions = decisions
 	if wd, err := os.Getwd(); err == nil && wd != "" {
 		agent.WorkDir = wd
 	}

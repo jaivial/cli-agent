@@ -66,7 +66,7 @@ func applyFlagOverrides(cmd *cobra.Command, cfg *app.Config) error {
 
 func formatPermissionsStatus(desired string) string {
 	desiredMode := app.NormalizePermissionsMode(desired)
-	effectiveMode, isRoot := app.EffectivePermissionsMode(desiredMode)
+	effectiveMode, isElevated := app.EffectivePermissionsMode(desiredMode)
 
 	var b strings.Builder
 	b.WriteString("permissions status:\n")
@@ -76,13 +76,10 @@ func formatPermissionsStatus(desired string) string {
 	b.WriteString("- effective: ")
 	b.WriteString(effectiveMode)
 	b.WriteString("\n")
-	if isRoot {
-		b.WriteString("- running as root: yes\n")
+	if isElevated {
+		b.WriteString("- elevated privileges: yes\n")
 	} else {
-		b.WriteString("- running as root: no\n")
-	}
-	if desiredMode == app.PermissionsDangerouslyFullAccess && !isRoot {
-		b.WriteString("- note: dangerously-full-access requires launching eai as root (example: sudo -E eai)\n")
+		b.WriteString("- elevated privileges: no\n")
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -367,6 +364,7 @@ func main() {
 
 			stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 			agent := app.NewAgentLoop(appInstance.Client, agentMaxLoops, stateDir, appInstance.Logger)
+			agent.PermissionsMode = cfg.Permissions
 
 			start := time.Now()
 			state, err := agent.Execute(ctx, task)

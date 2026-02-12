@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"cli-agent/internal/app"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -33,31 +35,85 @@ const (
 	inputMaxLines = 8
 )
 
+func isListNavUp(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyShiftUp:
+		return true
+	}
+	switch msg.String() {
+	case "up", "shift+up", "k":
+		return true
+	default:
+		return false
+	}
+}
+
+func isListNavDown(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyDown, tea.KeyShiftDown:
+		return true
+	}
+	switch msg.String() {
+	case "down", "shift+down", "j":
+		return true
+	default:
+		return false
+	}
+}
+
+func isArrowUp(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyShiftUp:
+		return true
+	}
+	switch msg.String() {
+	case "up", "shift+up":
+		return true
+	default:
+		return false
+	}
+}
+
+func isArrowDown(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyDown, tea.KeyShiftDown:
+		return true
+	}
+	switch msg.String() {
+	case "down", "shift+down":
+		return true
+	default:
+		return false
+	}
+}
+
 type MainModel struct {
-	app          *app.Application
-	mode         app.Mode
-	messages     []Message
-	title        string
-	session      *app.Session
-	input        textarea.Model
-	inputHistory []string
-	historyIndex int
-	historyDraft string
-	viewport     viewport.Model
-	help         helpModel
-	width        int
-	height       int
-	markdown     *MarkdownRenderer
-	diffRenderer *DiffRenderer
-	loading      bool
-	loadingText  string
-	spinnerPos   int
-	loadingSince time.Time
-	loadingEnded time.Time
-	startupUntil time.Time
-	animEnabled  bool
-	modeIndex    int
-	ready        bool
+	app              *app.Application
+	mode             app.Mode
+	messages         []Message
+	title            string
+	session          *app.Session
+	input            textarea.Model
+	inputAttachments []inputAttachment
+	nextImageIndex   int
+	inputHistory     []string
+	historyIndex     int
+	historyDraft     string
+	viewport         viewport.Model
+	help             helpModel
+	width            int
+	height           int
+	markdown         *MarkdownRenderer
+	diffRenderer     *DiffRenderer
+	loading          bool
+	loadingText      string
+	spinnerPos       int
+	loadingSince     time.Time
+	loadingEnded     time.Time
+	startupUntil     time.Time
+	animEnabled      bool
+	modeIndex        int
+	ready            bool
 
 	progressCh   chan app.ProgressEvent
 	activeCancel context.CancelFunc
@@ -97,19 +153,28 @@ type MainModel struct {
 	pendingPlanText    string
 	pendingPlanContext string
 
+	permissionDecisionActive bool
+	permissionDecisionChoice int
+	pendingPermissionText    string
+	pendingPermissionTool    string
+	pendingPermissionCallID  string
+	permissionDecisionCh     chan app.PermissionDecision
+
 	modelPickerActive bool
 	modelPickerIndex  int
 	modelOptions      []string
 
-	slashPopupIndex int
-	slashPopupKey   string
+	slashPopupIndex  int
+	slashPopupKey    string
+	slashPopupHeight int
 
 	permissionsPickerActive bool
 	permissionsPickerIndex  int
 	permissionsOptions      []string
 
-	transientErrorText  string
-	transientErrorToken int
+	transientErrorText         string
+	transientErrorToken        int
+	sessionElevationAuthorized bool
 }
 
 type Message struct {
@@ -186,7 +251,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	ta := textarea.New()
 	ta.Placeholder = "message... (/ for commands, /new new chat, esc cancel, enter send)"
 	ta.Focus()
-	ta.CharLimit = 8000
+	ta.CharLimit = 0
 	ta.SetWidth(60)
 	ta.SetHeight(1)
 	ta.Prompt = " "
@@ -222,6 +287,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 		title:              "New Chat",
 		session:            nil,
 		input:              ta,
+		nextImageIndex:     1,
 		inputHistory:       make([]string, 0, 64),
 		historyIndex:       -1,
 		help:               newHelpModel(),
@@ -424,7 +490,7 @@ func (m *MainModel) startNewChat() tea.Cmd {
 }
 
 func (m *MainModel) maybeStartNextQueued() tea.Cmd {
-	if m.loading || !m.turnResponseDone || !m.turnProgressDone || m.planDecisionActive {
+	if m.loading || !m.turnResponseDone || !m.turnProgressDone || m.planDecisionActive || m.permissionDecisionActive {
 		return nil
 	}
 	if len(m.queuedRequests) == 0 {
@@ -450,6 +516,14 @@ func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 	m.planDecisionChoice = planDecisionYes
 	m.pendingPlanText = ""
 	m.pendingPlanContext = ""
+
+	// Clear any lingering permission prompt state.
+	m.permissionDecisionActive = false
+	m.permissionDecisionChoice = permissionDecisionAllow
+	m.pendingPermissionText = ""
+	m.pendingPermissionTool = ""
+	m.pendingPermissionCallID = ""
+	m.permissionDecisionCh = make(chan app.PermissionDecision, 16)
 
 	// Start a fresh persisted session on first user message (no auto-resume).
 	if err := m.ensureSession(); err != nil {
@@ -674,7 +748,7 @@ func (m *MainModel) statusBarHeight() int {
 func (m *MainModel) inputAreaHeight() int {
 	// Activity line + bordered textarea (top and bottom border + content lines) +
 	// a reserved one-line error message below the input box.
-	height := 1 + 2 + m.input.Height() + 1
+	height := 1 + 2 + m.input.Height() + m.inputAttachmentsHeight() + 1
 	if m.modelPickerActive {
 		if pickerHeight := lipgloss.Height(m.renderModelPicker()); pickerHeight > 0 {
 			height += pickerHeight + 1
@@ -689,11 +763,48 @@ func (m *MainModel) inputAreaHeight() int {
 	return height
 }
 
-func (m *MainModel) recomputeInputHeight() bool {
-	contentWidth := m.chatAreaWidth() - 8
-	if contentWidth < 10 {
-		contentWidth = 10
+func (m *MainModel) inputContentWidth() int {
+	w := m.chatAreaWidth() - 8
+	if w < 10 {
+		w = 10
 	}
+	return w
+}
+
+func (m *MainModel) renderInputAttachments(width int) string {
+	if len(m.inputAttachments) == 0 {
+		return ""
+	}
+	if width < 10 {
+		width = 10
+	}
+
+	labels := make([]string, 0, len(m.inputAttachments))
+	for _, att := range m.inputAttachments {
+		label := strings.TrimSpace(att.label)
+		if label == "" {
+			continue
+		}
+		labels = append(labels, label)
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+
+	text := strings.Join(labels, " ")
+	text = wrap.String(text, width)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent)).Render(text)
+}
+
+func (m *MainModel) inputAttachmentsHeight() int {
+	if len(m.inputAttachments) == 0 {
+		return 0
+	}
+	return lipgloss.Height(m.renderInputAttachments(m.inputContentWidth()))
+}
+
+func (m *MainModel) recomputeInputHeight() bool {
+	contentWidth := m.inputContentWidth()
 	text := m.input.Value()
 	lines := strings.Split(text, "\n")
 	needed := 0
@@ -726,12 +837,22 @@ func (m *MainModel) recomputeInputHeight() bool {
 }
 
 func (m *MainModel) resetInput() {
+	wasAtBottom := true
+	if m.ready {
+		wasAtBottom = m.stickToBottom || m.viewport.AtBottom()
+	}
 	m.historyIndex = -1
 	m.historyDraft = ""
+	hadAttachments := m.clearInputAttachments()
 	m.input.Reset()
-	m.updateSlashPopupState()
-	if m.recomputeInputHeight() {
+	popupHeightChanged := m.updateSlashPopupState()
+	if m.recomputeInputHeight() || hadAttachments || popupHeightChanged {
 		m.applyLayout()
+		if wasAtBottom {
+			m.viewport.GotoBottom()
+			m.stickToBottom = true
+			m.unseenCount = 0
+		}
 	}
 }
 
@@ -790,11 +911,14 @@ func (m *MainModel) rebuildInputHistoryFromMessages() {
 func (m *MainModel) setInputValue(value string) {
 	m.input.SetValue(value)
 	m.input.CursorEnd()
-	m.updateSlashPopupState()
-	if m.recomputeInputHeight() {
+	popupHeightChanged := m.updateSlashPopupState()
+	inputHeightChanged := m.recomputeInputHeight()
+	if inputHeightChanged || popupHeightChanged {
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
 		m.applyLayout()
-		m.updateViewport()
+		if inputHeightChanged {
+			m.updateViewport()
+		}
 		if wasAtBottom {
 			m.viewport.GotoBottom()
 			m.stickToBottom = true
@@ -847,7 +971,7 @@ func (m *MainModel) headerHeight() int {
 }
 
 func (m *MainModel) chatAreaHeight() int {
-	return m.height - m.headerHeight() - m.planDecisionHeight() - m.statusBarHeight() - m.inputAreaHeight()
+	return m.height - m.headerHeight() - m.permissionDecisionHeight() - m.planDecisionHeight() - m.statusBarHeight() - m.inputAreaHeight()
 }
 
 func (m *MainModel) applyLayout() {
@@ -994,11 +1118,11 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.resumePickerActive {
 			switch {
 			case key.Matches(msg, m.help.keys.Quit):
-				return m, tea.Quit
+				return m, m.quitCmd()
 			case msg.Type == tea.KeyEsc:
 				m.closeResumePicker()
 				return m, nil
-			case msg.String() == "up" || msg.String() == "k":
+			case isListNavUp(msg):
 				if len(m.resumeItems) > 0 {
 					m.resumeIndex--
 					if m.resumeIndex < 0 {
@@ -1006,7 +1130,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, m.resumeTick()
-			case msg.String() == "down" || msg.String() == "j":
+			case isListNavDown(msg):
 				if len(m.resumeItems) > 0 {
 					m.resumeIndex = (m.resumeIndex + 1) % len(m.resumeItems)
 				}
@@ -1031,11 +1155,11 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modelPickerActive {
 			switch {
 			case key.Matches(msg, m.help.keys.Quit):
-				return m, tea.Quit
+				return m, m.quitCmd()
 			}
 
-			switch msg.String() {
-			case "up", "k":
+			switch {
+			case isListNavUp(msg):
 				if len(m.modelOptions) > 0 {
 					m.modelPickerIndex--
 					if m.modelPickerIndex < 0 {
@@ -1043,7 +1167,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case "down", "j":
+			case isListNavDown(msg):
 				if len(m.modelOptions) > 0 {
 					m.modelPickerIndex = (m.modelPickerIndex + 1) % len(m.modelOptions)
 				}
@@ -1086,11 +1210,11 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.permissionsPickerActive {
 			switch {
 			case key.Matches(msg, m.help.keys.Quit):
-				return m, tea.Quit
+				return m, m.quitCmd()
 			}
 
-			switch msg.String() {
-			case "up", "k":
+			switch {
+			case isListNavUp(msg):
 				if len(m.permissionsOptions) > 0 {
 					m.permissionsPickerIndex--
 					if m.permissionsPickerIndex < 0 {
@@ -1098,7 +1222,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case "down", "j":
+			case isListNavDown(msg):
 				if len(m.permissionsOptions) > 0 {
 					m.permissionsPickerIndex = (m.permissionsPickerIndex + 1) % len(m.permissionsOptions)
 				}
@@ -1138,12 +1262,61 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.permissionDecisionActive {
+			switch {
+			case key.Matches(msg, m.help.keys.Quit):
+				return m, m.quitCmd()
+			}
+
+			switch {
+			case isListNavUp(msg):
+				m.permissionDecisionChoice = permissionDecisionAllow
+				return m, nil
+			case isListNavDown(msg):
+				m.permissionDecisionChoice = permissionDecisionDeny
+				return m, nil
+			}
+
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.permissionDecisionChoice = permissionDecisionDeny
+				fallthrough
+			case tea.KeyEnter:
+				allow := m.permissionDecisionChoice != permissionDecisionDeny
+				if !allow {
+					m.permissionDecisionChoice = permissionDecisionDeny
+				}
+				if ch := m.permissionDecisionCh; ch != nil {
+					id := strings.TrimSpace(m.pendingPermissionCallID)
+					select {
+					case ch <- app.PermissionDecision{ToolCallID: id, Allow: allow}:
+					default:
+					}
+				}
+				m.permissionDecisionActive = false
+				m.permissionDecisionChoice = permissionDecisionAllow
+				m.pendingPermissionText = ""
+				m.pendingPermissionTool = ""
+				m.pendingPermissionCallID = ""
+				m.applyLayout()
+				m.updateViewport()
+				if m.stickToBottom || m.viewport.AtBottom() {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
 		if m.planDecisionActive {
-			switch msg.String() {
-			case "up", "k":
+			switch {
+			case isListNavUp(msg):
 				m.planDecisionChoice = planDecisionYes
 				return m, nil
-			case "down", "j":
+			case isListNavDown(msg):
 				m.planDecisionChoice = planDecisionNo
 				return m, nil
 			}
@@ -1192,6 +1365,55 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Intercept paste events to capture long text blobs and image paths as
+		// attachments while keeping the input UI compact.
+		if msg.Type == tea.KeyRunes && msg.Paste {
+			if m.tryConsumePasteAsAttachment(string(msg.Runes)) {
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				m.updateSlashPopupState()
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+				return m, nil
+			}
+		}
+		if key.Matches(msg, m.input.KeyMap.Paste) {
+			pasted, err := clipboard.ReadAll()
+			if err != nil {
+				return m, m.showTransientError(fmt.Sprintf("paste failed: %v", err))
+			}
+			pasted = normalizeNewlines(pasted)
+			if m.tryConsumePasteAsAttachment(pasted) {
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				m.updateSlashPopupState()
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+				return m, nil
+			}
+			m.input.InsertString(pasted)
+			popupHeightChanged := m.updateSlashPopupState()
+			if m.recomputeInputHeight() || popupHeightChanged {
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+			}
+			return m, nil
+		}
+
 		if msg.Type == tea.KeyEsc && m.loading {
 			if m.activeCancel != nil && !m.cancelQueued {
 				m.cancelQueued = true
@@ -1214,25 +1436,25 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if items := m.slashPopupItems(); len(items) > 0 {
-			switch msg.String() {
-			case "up":
+			switch {
+			case isArrowUp(msg):
 				m.slashPopupIndex--
 				if m.slashPopupIndex < 0 {
 					m.slashPopupIndex = len(items) - 1
 				}
 				return m, nil
-			case "down":
+			case isArrowDown(msg):
 				m.slashPopupIndex = (m.slashPopupIndex + 1) % len(items)
 				return m, nil
 			}
 		}
 
 		switch {
-		case msg.Type == tea.KeyUp || key.Matches(msg, m.input.KeyMap.LinePrevious):
+		case msg.Type == tea.KeyUp || msg.Type == tea.KeyShiftUp || key.Matches(msg, m.input.KeyMap.LinePrevious):
 			if m.browseInputHistory(-1) {
 				return m, nil
 			}
-		case msg.Type == tea.KeyDown || key.Matches(msg, m.input.KeyMap.LineNext):
+		case msg.Type == tea.KeyDown || msg.Type == tea.KeyShiftDown || key.Matches(msg, m.input.KeyMap.LineNext):
 			if m.browseInputHistory(1) {
 				return m, nil
 			}
@@ -1240,23 +1462,37 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.help.keys.Quit):
-			return m, tea.Quit
+			return m, m.quitCmd()
 
-		case key.Matches(msg, m.help.keys.Enter):
-			if m.input.Value() == "" {
-				return m, nil
-			}
-
-			input := strings.TrimSpace(m.input.Value())
+		case msg.Type == tea.KeyTab:
 			if items := m.slashPopupItems(); len(items) > 0 {
 				idx := m.slashPopupIndex
 				if idx < 0 || idx >= len(items) {
 					idx = 0
 				}
 				insert := strings.TrimSpace(items[idx].InsertText)
-				if insert != "" && !strings.EqualFold(strings.TrimSpace(input), insert) {
+				if insert != "" && !strings.EqualFold(strings.TrimSpace(m.input.Value()), insert) {
 					m.setInputValue(insert)
-					return m, nil
+				}
+				return m, nil
+			}
+
+		case key.Matches(msg, m.help.keys.Enter):
+			input := strings.TrimSpace(m.input.Value())
+			if input == "" && !m.hasInputAttachments() {
+				return m, nil
+			}
+
+			// When the command picker is visible, pressing Enter executes the selected
+			// command. Use Tab to autocomplete into the input field.
+			if items := m.slashPopupItems(); len(items) > 0 {
+				idx := m.slashPopupIndex
+				if idx < 0 || idx >= len(items) {
+					idx = 0
+				}
+				insert := strings.TrimSpace(items[idx].InsertText)
+				if insert != "" {
+					input = insert
 				}
 			}
 
@@ -1276,7 +1512,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.startNewChat()
 			}
 
-			if handled, content, role := m.handlePermissionsCommand(input); handled {
+			if handled, content, role, permCmd := m.handlePermissionsCommand(input); handled {
 				if strings.EqualFold(role, "error") {
 					m.resetInput()
 					return m, m.logAndShowErrorText("permissions", content)
@@ -1290,7 +1526,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetInput()
 				m.updateViewport()
 				m.viewport.GotoBottom()
-				return m, nil
+				return m, permCmd
 			}
 			if strings.HasPrefix(input, "/connect") {
 				if m.loading {
@@ -1330,7 +1566,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetInput()
 				m.updateViewport()
 				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.ClearScreen
 			}
 			if strings.HasPrefix(strings.ToLower(input), "/model") {
 				m.resetInput()
@@ -1372,15 +1608,61 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.resumeTick()
 			}
 
+			fields := strings.Fields(input)
+			if len(fields) > 0 && strings.EqualFold(fields[0], "/logs") {
+				limit := 40
+				if len(fields) > 1 {
+					if n, err := strconv.Atoi(strings.TrimSpace(fields[1])); err == nil {
+						limit = n
+					}
+				}
+
+				logPath := app.DefaultLogPath()
+				events, err := readRecentWarnErrorLogs(logPath, limit)
+				if err != nil {
+					m.resetInput()
+					return m, m.logAndShowError("logs", err)
+				}
+
+				var b strings.Builder
+				if len(events) == 0 {
+					b.WriteString("no warn/error logs found.")
+				} else {
+					b.WriteString("recent logs (warn/error):\n")
+					for i, ev := range events {
+						b.WriteString(formatWarnErrorLogEvent(ev))
+						if i < len(events)-1 {
+							b.WriteString("\n")
+						}
+					}
+				}
+
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content:   strings.TrimSpace(b.String()),
+					Timestamp: time.Now(),
+				})
+				m.resetInput()
+				m.updateViewport()
+				m.viewport.GotoBottom()
+				return m, nil
+			}
+
+			query, display := m.buildUserTurn(input)
+			if strings.TrimSpace(query) == "" {
+				return m, nil
+			}
+
 			if m.loading {
 				// Avoid starting concurrent agent runs; queue user turns instead.
 				m.pushInputHistory(input)
 				m.queuedRequests = append(m.queuedRequests, queuedRequest{
-					query:    input,
-					display:  input,
+					query:    query,
+					display:  display,
 					queuedAt: time.Now(),
 				})
-				preview := strings.TrimSpace(input)
+				preview := strings.TrimSpace(display)
 				if i := strings.IndexByte(preview, '\n'); i >= 0 {
 					preview = preview[:i]
 				}
@@ -1405,7 +1687,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.pushInputHistory(input)
 			m.resetInput()
-			return m, m.submitUserRequest(input, input)
+			return m, m.submitUserRequest(query, display)
 
 		case key.Matches(msg, m.help.keys.Clear):
 			return m, m.startNewChat()
@@ -1471,6 +1753,12 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		canceled := m.cancelQueued
 		var errCmd tea.Cmd
 		m.loading = false
+		m.permissionDecisionActive = false
+		m.permissionDecisionChoice = permissionDecisionAllow
+		m.pendingPermissionText = ""
+		m.pendingPermissionTool = ""
+		m.pendingPermissionCallID = ""
+		m.permissionDecisionCh = nil
 		m.loadingEnded = time.Now()
 		m.turnResponseDone = true
 		if m.activeCancel != nil {
@@ -1537,6 +1825,26 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.turnEvents = append(m.turnEvents, ev)
 		kind := strings.ToLower(strings.TrimSpace(ev.Kind))
+		if kind == "permission_request" {
+			m.permissionDecisionActive = true
+			m.permissionDecisionChoice = permissionDecisionAllow
+			m.pendingPermissionText = strings.TrimSpace(ev.Text)
+			m.pendingPermissionTool = strings.TrimSpace(ev.Tool)
+			m.pendingPermissionCallID = strings.TrimSpace(ev.ToolCallID)
+
+			m.loadingText = "permission approval required"
+			wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+			m.applyLayout()
+			m.updateTurnTrace(true)
+			m.updateViewport()
+			if wasAtBottom {
+				m.viewport.GotoBottom()
+				m.stickToBottom = true
+				m.unseenCount = 0
+			}
+			return m, m.waitForProgress(m.progressCh)
+		}
+
 		if kind == "file_edit" {
 			path := strings.TrimSpace(ev.Path)
 			if path == "" {
@@ -1551,7 +1859,28 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.timelineEnabled && kind != "" && kind != "tool_output" {
 			m.turnProgress = append(m.turnProgress, ev)
 		}
-		if kind != "tool_output" {
+
+		// Surface warnings/errors below the input box (without dumping JSON logs).
+		var msgCmd tea.Cmd
+		switch kind {
+		case "warn", "error":
+			if txt := strings.TrimSpace(ev.Text); txt != "" {
+				msgCmd = m.showTransientError(txt)
+			}
+		case "tool":
+			if strings.EqualFold(strings.TrimSpace(ev.ToolStatus), "error") {
+				if txt := strings.TrimSpace(ev.Error); txt != "" {
+					msgCmd = m.showTransientError(txt)
+				}
+			}
+		default:
+			if txt := strings.TrimSpace(ev.Error); txt != "" {
+				msgCmd = m.showTransientError(txt)
+			}
+		}
+
+		// Don't let warn/error events override the main progress line.
+		if kind != "tool_output" && kind != "warn" && kind != "error" {
 			txt := strings.TrimSpace(ev.Text)
 			if txt != "" {
 				m.loadingText = txt
@@ -1565,6 +1894,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stickToBottom = true
 			m.unseenCount = 0
 		}
+		if msgCmd != nil {
+			return m, tea.Batch(msgCmd, m.waitForProgress(m.progressCh))
+		}
 		return m, m.waitForProgress(m.progressCh)
 
 	case progressDoneMsg:
@@ -1574,6 +1906,37 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+
+	case permissionsElevationResultMsg:
+		text := strings.TrimSpace(msg.text)
+		if text == "" {
+			return m, nil
+		}
+
+		role := "system"
+		var outCmd tea.Cmd
+		if msg.isError {
+			role = "error"
+			outCmd = m.showTransientError(text)
+		}
+		if msg.sessionAuthorized {
+			m.sessionElevationAuthorized = true
+		}
+
+		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+		m.messages = append(m.messages, Message{
+			ID:        fmt.Sprintf("%s-%d", role, time.Now().UnixNano()),
+			Role:      role,
+			Content:   text,
+			Timestamp: time.Now(),
+		})
+		m.updateViewport()
+		if wasAtBottom {
+			m.viewport.GotoBottom()
+			m.stickToBottom = true
+			m.unseenCount = 0
+		}
+		return m, outCmd
 
 	case titleMsg:
 		if strings.TrimSpace(msg.title) != "" {
@@ -1620,11 +1983,14 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
-	m.updateSlashPopupState()
-	if m.recomputeInputHeight() {
+	popupHeightChanged := m.updateSlashPopupState()
+	inputHeightChanged := m.recomputeInputHeight()
+	if inputHeightChanged || popupHeightChanged {
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
 		m.applyLayout()
-		m.updateViewport()
+		if inputHeightChanged {
+			m.updateViewport()
+		}
 		if wasAtBottom {
 			m.viewport.GotoBottom()
 			m.stickToBottom = true
@@ -1939,6 +2305,7 @@ func (m *MainModel) View() string {
 		m.viewport.View(),
 		m.renderScrollbar(chatHeight),
 	)
+	permissionDecision := m.renderPermissionDecision()
 	planDecision := m.renderPlanDecision()
 	statusBar := m.renderStatusBar()
 	inputArea := m.renderInputArea()
@@ -1948,6 +2315,9 @@ func (m *MainModel) View() string {
 		parts = append(parts, header)
 	}
 	parts = append(parts, chatArea)
+	if permissionDecision != "" {
+		parts = append(parts, permissionDecision)
+	}
 	if planDecision != "" {
 		parts = append(parts, planDecision)
 	}
@@ -1960,79 +2330,104 @@ func (m *MainModel) renderHeader() string {
 		return ""
 	}
 
+	width := m.chatAreaWidth()
+	if width < 1 {
+		width = m.width
+	}
+	if width < 1 {
+		return ""
+	}
+
 	separator := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colorBorderSoft)).
-		Render(strings.Repeat("─", m.width))
-	return lipgloss.JoinVertical(lipgloss.Left, GetBanner(m.width), separator)
+		Render(strings.Repeat("─", width))
+	return lipgloss.JoinVertical(lipgloss.Left, GetBanner(width), separator)
 }
 
 func (m *MainModel) renderStatusBar() string {
-	scrollInfo := ""
-	if m.viewport.TotalLineCount() > m.viewport.Height {
-		scrollInfo = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
+	width := m.chatAreaWidth()
+	if width < 10 {
+		width = m.width
+	}
+	if width < 10 {
+		width = 10
 	}
 
-	newInfo := ""
-	if !m.stickToBottom && m.unseenCount > 0 {
-		newInfo = fmt.Sprintf("new:%d ", m.unseenCount)
-	}
-	queueInfo := ""
-	if len(m.queuedRequests) > 0 {
-		queueInfo = fmt.Sprintf("q:%d ", len(m.queuedRequests))
-	}
-	cancelInfo := ""
-	if m.loading && m.cancelQueued {
-		cancelInfo = "canceling "
-	}
 	rightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
-	rightText := newInfo + queueInfo + scrollInfo + cancelInfo + time.Now().Format("15:04")
-	right := rightStyle.Render(rightText)
-
-	brandStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorAccent)).
-		Bold(true)
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorFg)).
-		Bold(true)
-	metaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colorMuted))
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	brandStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent)).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorFg)).Bold(true)
 
 	sep := metaStyle.Render(" · ")
+	sepW := lipgloss.Width(sep)
 	brand := brandStyle.Render("eai")
 	mode := metaStyle.Render("agent")
 	verb := metaStyle.Render(m.verbosity)
+
+	baseLeftNoTitle := brand + sep + mode + sep + verb
+	baseLeftNoTitleW := lipgloss.Width(baseLeftNoTitle)
+
+	scrollTok := ""
+	if m.viewport.TotalLineCount() > m.viewport.Height {
+		scrollTok = fmt.Sprintf("%d%%", int(m.viewport.ScrollPercent()*100))
+	}
+
+	// Build the right side from highest-priority tokens to lowest, dropping
+	// optional ones when the terminal is narrow so we never hard-wrap (which
+	// breaks Bubble Tea's renderer in some terminals).
+	timeTok := time.Now().Format("15:04")
+	optional := make([]string, 0, 4)
+	if m.loading && m.cancelQueued {
+		optional = append(optional, "canceling")
+	}
+	if len(m.queuedRequests) > 0 {
+		optional = append(optional, fmt.Sprintf("q:%d", len(m.queuedRequests)))
+	}
+	if !m.stickToBottom && m.unseenCount > 0 {
+		optional = append(optional, fmt.Sprintf("new:%d", m.unseenCount))
+	}
+	if scrollTok != "" {
+		optional = append(optional, scrollTok)
+	}
+
+	buildRight := func(tokens []string) (text, styled string) {
+		toks := make([]string, 0, len(tokens)+1)
+		toks = append(toks, tokens...)
+		toks = append(toks, timeTok)
+		text = strings.Join(toks, " ")
+		styled = rightStyle.Render(text)
+		return text, styled
+	}
+
+	rightText, right := buildRight(optional)
+	for len(optional) > 0 && lipgloss.Width(right)+baseLeftNoTitleW > width {
+		optional = optional[:len(optional)-1] // drop lowest priority tokens first
+		rightText, right = buildRight(optional)
+	}
+	if lipgloss.Width(right) > width {
+		rightText = truncate.StringWithTail(rightText, uint(width), "…")
+		right = rightStyle.Render(rightText)
+	}
 
 	title := strings.TrimSpace(m.title)
 	if title == "" {
 		title = "New Chat"
 	}
 
-	// Truncate the title so the status bar never overflows the right side.
-	maxLeft := m.width - lipgloss.Width(right)
-	if maxLeft < 0 {
-		maxLeft = 0
-	}
-	fixedW := lipgloss.Width(brand) + lipgloss.Width(sep)*3 + lipgloss.Width(mode) + lipgloss.Width(verb)
-	titleW := maxLeft - fixedW
-	if titleW < 4 {
-		title = ""
-	} else {
+	// Title only shows if it fits between the fixed left parts and the right side.
+	left := baseLeftNoTitle
+	maxLeft := width - lipgloss.Width(right)
+	titleW := maxLeft - baseLeftNoTitleW - sepW
+	if titleW >= 4 {
 		title = truncate.StringWithTail(title, uint(titleW), "…")
+		left = brand + sep + titleStyle.Render(title) + sep + mode + sep + verb
 	}
 
-	left := brand
-	if title != "" {
-		left += sep + titleStyle.Render(title)
-	}
-	left += sep + mode + sep + verb
-
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
 	}
-
-	middle := strings.Repeat(" ", gap)
-	line1 := left + middle + right
+	line1 := left + strings.Repeat(" ", gap) + right
 
 	model := ""
 	if m.app != nil {
@@ -2046,8 +2441,8 @@ func (m *MainModel) renderStatusBar() string {
 	}
 
 	line2Text := "model: " + model
-	if m.width > 0 {
-		line2Text = truncate.StringWithTail(line2Text, uint(m.width), "…")
+	if width > 0 {
+		line2Text = truncate.StringWithTail(line2Text, uint(width), "…")
 	}
 	line2 := rightStyle.Render(line2Text)
 	return line1 + "\n" + line2
@@ -2169,12 +2564,18 @@ func (m *MainModel) renderInputArea() string {
 	result.WriteString("\n")
 
 	// Input box with thin border
+	contentWidth := m.inputContentWidth()
+	inputContent := m.input.View()
+	if att := m.renderInputAttachments(contentWidth); att != "" {
+		inputContent = att + "\n" + inputContent
+	}
+
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(0, 1).
 		Width(m.chatAreaWidth() - 2).
-		Render(m.input.View())
+		Render(inputContent)
 
 	result.WriteString(inputBox)
 
@@ -2189,7 +2590,7 @@ func (m *MainModel) renderInputArea() string {
 		// One line only; truncate with an ellipsis.
 		errText = truncate.StringWithTail(errText, uint(width), "…")
 		errLine := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colorError)).
+			Foreground(lipgloss.Color(colorErrorDark)).
 			Render(errText)
 		result.WriteString(errLine)
 	}
@@ -2199,9 +2600,6 @@ func (m *MainModel) renderInputArea() string {
 
 func (m *MainModel) renderResumePicker() string {
 	maxWidth := m.chatAreaWidth() - 4
-	if maxWidth < 30 {
-		maxWidth = m.chatAreaWidth()
-	}
 	totalHeight := m.height - m.headerHeight() - m.statusBarHeight()
 	if totalHeight < 8 {
 		totalHeight = 8
@@ -2227,7 +2625,7 @@ func (m *MainModel) renderResumePicker() string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(colorBorder)).
 			Padding(1, 1).
-			Width(m.chatAreaWidth()).
+			Width(m.chatAreaWidth() - 2).
 			Height(totalHeight).
 			Render(b.String())
 	}
@@ -2300,7 +2698,7 @@ func (m *MainModel) renderResumePicker() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(1, 1).
-		Width(m.chatAreaWidth()).
+		Width(m.chatAreaWidth() - 2).
 		Height(totalHeight).
 		Render(content)
 }
@@ -2380,7 +2778,7 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 			sid = m.session.ID
 			workDir = m.sessionWorkDir()
 		}
-		response, err := m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb)
+		response, err := m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb, m.permissionDecisionCh)
 		if progressCh != nil {
 			close(progressCh)
 		}
@@ -2391,37 +2789,37 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 	}
 }
 
-func (m *MainModel) handlePermissionsCommand(input string) (handled bool, content string, role string) {
+func (m *MainModel) handlePermissionsCommand(input string) (handled bool, content string, role string, cmd tea.Cmd) {
 	trimmed := strings.TrimSpace(input)
 	lower := strings.ToLower(trimmed)
 	if !strings.HasPrefix(lower, "/permissions") {
-		return false, "", ""
+		return false, "", "", nil
 	}
 
 	if m.app == nil {
-		return true, "permissions command unavailable: app is not initialized", "error"
+		return true, "permissions command unavailable: app is not initialized", "error", nil
 	}
 
 	arg := strings.TrimSpace(trimmed[len("/permissions"):])
 	if arg == "" {
-		return true, renderPermissionsStatus(m.app.Config.Permissions), "system"
+		return true, renderPermissionsStatus(m.app.Config.Permissions), "system", nil
 	}
 
 	mode, ok := app.ParsePermissionsMode(arg)
 	if !ok {
-		return true, fmt.Sprintf("invalid permissions mode %q. use: /permissions full-access|dangerously-full-access", arg), "error"
+		return true, fmt.Sprintf("invalid permissions mode %q. use: /permissions full-access|dangerously-full-access", arg), "error", nil
 	}
 
 	m.app.Config.Permissions = mode
 	if err := app.SaveConfig(m.app.Config, app.DefaultConfigPath()); err != nil {
-		return true, fmt.Sprintf("permissions updated in-memory (%s), but failed to save config: %v\n\n%s", mode, err, renderPermissionsStatus(mode)), "error"
+		return true, fmt.Sprintf("permissions updated in-memory (%s), but failed to save config: %v\n\n%s", mode, err, renderPermissionsStatus(mode)), "error", nil
 	}
-	return true, fmt.Sprintf("permissions updated to %s\n\n%s", mode, renderPermissionsStatus(mode)), "system"
+	return true, fmt.Sprintf("permissions updated to %s\n\n%s", mode, renderPermissionsStatus(mode)), "system", m.permissionsModePostApplyCmd(mode)
 }
 
 func renderPermissionsStatus(desired string) string {
 	desiredMode := app.NormalizePermissionsMode(desired)
-	effectiveMode, isRoot := app.EffectivePermissionsMode(desiredMode)
+	effectiveMode, isElevated := app.EffectivePermissionsMode(desiredMode)
 
 	var b strings.Builder
 	b.WriteString("permissions status:\n")
@@ -2431,13 +2829,10 @@ func renderPermissionsStatus(desired string) string {
 	b.WriteString("- effective: ")
 	b.WriteString(effectiveMode)
 	b.WriteString("\n")
-	if isRoot {
-		b.WriteString("- running as root: yes\n")
+	if isElevated {
+		b.WriteString("- elevated privileges: yes\n")
 	} else {
-		b.WriteString("- running as root: no\n")
-	}
-	if desiredMode == app.PermissionsDangerouslyFullAccess && !isRoot {
-		b.WriteString("- note: dangerously-full-access requires launching eai as root (example: sudo -E eai)\n")
+		b.WriteString("- elevated privileges: no\n")
 	}
 	return strings.TrimSpace(b.String())
 }

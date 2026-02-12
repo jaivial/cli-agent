@@ -48,7 +48,7 @@ func (m *MainModel) selectPermissionsAt(index int) (string, tea.Cmd) {
 		return "", m.logAndShowError("failed to save permissions", err)
 	}
 	m.app.Config.Permissions = mode
-	return mode, nil
+	return mode, m.permissionsModePostApplyCmd(mode)
 }
 
 func (m *MainModel) renderPermissionsPicker() string {
@@ -58,15 +58,18 @@ func (m *MainModel) renderPermissionsPicker() string {
 
 	desired := app.PermissionsFullAccess
 	effective := app.PermissionsFullAccess
-	isRoot := false
+	isElevated := false
 	if m.app != nil {
 		desired = app.NormalizePermissionsMode(m.app.Config.Permissions)
-		effective, isRoot = app.EffectivePermissionsMode(desired)
+		effective, isElevated = app.EffectivePermissionsMode(desired)
 	}
 
 	width := m.chatAreaWidth() - 2
 	if width < 30 {
-		width = m.chatAreaWidth()
+		width = 30
+		if maxWidth := m.chatAreaWidth() - 2; width > maxWidth {
+			width = maxWidth
+		}
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
@@ -82,10 +85,10 @@ func (m *MainModel) renderPermissionsPicker() string {
 	b.WriteString("\n\n")
 
 	statusLine := fmt.Sprintf("desired: %s  ·  effective: %s", desired, effective)
-	if isRoot {
-		statusLine += "  ·  root: yes"
+	if isElevated {
+		statusLine += "  ·  elevated: yes"
 	} else {
-		statusLine += "  ·  root: no"
+		statusLine += "  ·  elevated: no"
 	}
 	b.WriteString(metaStyle.Render(truncate.StringWithTail(statusLine, uint(width), "…")))
 	b.WriteString("\n\n")
@@ -106,11 +109,6 @@ func (m *MainModel) renderPermissionsPicker() string {
 		if i < len(m.permissionsOptions)-1 {
 			b.WriteString("\n")
 		}
-	}
-
-	if !isRoot {
-		b.WriteString("\n\n")
-		b.WriteString(metaStyle.Render("note: `dangerously-full-access` only takes effect when running as root"))
 	}
 
 	return lipgloss.NewStyle().
