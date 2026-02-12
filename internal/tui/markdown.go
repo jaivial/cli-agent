@@ -100,11 +100,11 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 
 		// Add a simple prefix to indicate code block
 		var styled strings.Builder
-		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("```" + lang))
+		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted)).Render("```" + lang))
 		styled.WriteString("\n")
 		styled.WriteString(highlighted)
 		styled.WriteString("\n")
-		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("```"))
+		styled.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted)).Render("```"))
 
 		index := len(codeBlocks)
 		codeBlocks = append(codeBlocks, styled.String())
@@ -119,7 +119,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		code := r.decodeHTMLEntities(matches[1])
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF79C6")).
+			Foreground(lipgloss.Color(colorWarning)).
 			Render("`" + code + "`")
 	})
 
@@ -131,7 +131,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#BD93F9")).
+			Foreground(lipgloss.Color(colorAccent)).
 			Render("# "+matches[1]) + "\n"
 	})
 
@@ -142,7 +142,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FF79C6")).
+			Foreground(lipgloss.Color(colorAccent2)).
 			Render("## "+matches[1]) + "\n"
 	})
 
@@ -153,7 +153,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#8BE9FD")).
+			Foreground(lipgloss.Color(colorPurple)).
 			Render("### "+matches[1]) + "\n"
 	})
 
@@ -165,7 +165,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#F8F8F2")).
+			Foreground(lipgloss.Color(colorFg)).
 			Render(matches[1])
 	})
 
@@ -177,7 +177,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		}
 		return lipgloss.NewStyle().
 			Italic(true).
-			Foreground(lipgloss.Color("#8BE9FD")).
+			Foreground(lipgloss.Color(colorAccent2)).
 			Render(matches[1])
 	})
 
@@ -188,10 +188,10 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 			return m
 		}
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8BE9FD")).
+			Foreground(lipgloss.Color(colorAccent)).
 			Underline(true).
 			Render(matches[2]) + " " + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6272A4")).
+			Foreground(lipgloss.Color(colorMuted)).
 			Render("("+matches[1]+")")
 	})
 
@@ -204,7 +204,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 		content := strings.TrimSpace(matches[1])
 		content = htmlTagRegex.ReplaceAllString(content, "")
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6272A4")).
+			Foreground(lipgloss.Color(colorMuted)).
 			Render("> "+content) + "\n"
 	})
 
@@ -220,7 +220,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 			if len(item) >= 2 {
 				itemContent := htmlTagRegex.ReplaceAllString(item[1], "")
 				list.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#50FA7B")).
+					Foreground(lipgloss.Color(colorAccent2)).
 					Render("• "))
 				list.WriteString(itemContent)
 				list.WriteString("\n")
@@ -241,7 +241,7 @@ func (r *MarkdownRenderer) formatForTerminal(htmlContent string, width int) stri
 			if len(item) >= 2 {
 				itemContent := htmlTagRegex.ReplaceAllString(item[1], "")
 				list.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#FFB86C")).
+					Foreground(lipgloss.Color(colorMuted)).
 					Render(fmt.Sprintf("%d. ", i+1)))
 				list.WriteString(itemContent)
 				list.WriteString("\n")

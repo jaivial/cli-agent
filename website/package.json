@@ -8,15 +8,15 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "@gsap/react": "^2.1.2",
-    "gsap": "^3.14.2",
-    "preact": "^10.27.2",
-    "preact-router": "^4.1.2"
-  },
   "devDependencies": {
-    "@preact/preset-vite": "^2.10.2",
     "playwright": "^1.58.2",
     "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "framer-motion": "^12.34.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0"
   }
 }

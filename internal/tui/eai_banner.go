@@ -71,11 +71,11 @@ const compactBanner = `┌──────────────────
 // GetBanner returns the appropriate banner based on terminal width
 func GetBanner(width int) string {
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true)
 
 	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6272A4")).
+		Foreground(lipgloss.Color(colorMuted)).
 		Italic(true)
 
 	if width < 100 {
@@ -93,7 +93,7 @@ func GetBanner(width int) string {
 // GetMinimalHeader returns a minimal one-line header
 func GetMinimalHeader() string {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true).
 		Render("eai")
 }

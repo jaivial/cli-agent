@@ -22,20 +22,20 @@ type DiffRenderer struct {
 func NewDiffRenderer() *DiffRenderer {
 	return &DiffRenderer{
 		addedStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#50FA7B")),
+			Foreground(lipgloss.Color(colorSuccess)),
 		removedStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")),
+			Foreground(lipgloss.Color(colorError)),
 		headerStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#BD93F9")).
+			Foreground(lipgloss.Color(colorAccent2)).
 			Bold(true),
 		hunkStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8BE9FD")),
+			Foreground(lipgloss.Color(colorAccent)),
 		lineNumStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6272A4")),
+			Foreground(lipgloss.Color(colorMuted)),
 		contextStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F8F8F2")),
+			Foreground(lipgloss.Color(colorFg)),
 		filePathStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFB86C")).
+			Foreground(lipgloss.Color(colorAccent)).
 			Bold(true),
 	}
 }
@@ -83,7 +83,7 @@ func (d *DiffRenderer) RenderFileEdit(filePath string, oldContent, newContent st
 
 	// Header
 	headerBox := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true).
 		Render(fmt.Sprintf(" File Modified: %s ", filePath))
 
@@ -229,7 +229,7 @@ func FormatEditMessage(filePath string, changeType string, oldContent, newConten
 	}
 
 	header := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true).
 		Render(fmt.Sprintf("%s %s: %s", icon, action, filePath))
 
@@ -250,7 +250,7 @@ func FormatEditMessage(filePath string, changeType string, oldContent, newConten
 				result.WriteString("\n")
 			}
 			result.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6272A4")).
+				Foreground(lipgloss.Color(colorMuted)).
 				Italic(true).
 				Render(fmt.Sprintf("... and %d more lines", len(lines)-maxLines)))
 		} else {

@@ -114,3 +114,67 @@ func TestModelPickerCommandAndSelection(t *testing.T) {
 		t.Fatalf("unexpected final message: %q", last.Content)
 	}
 }
+
+func TestQueueUserTurnWhileAgentRunning(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+	m = applyWindowSize(t, m)
+	m.loading = true
+
+	m = sendEnter(t, m, "queued prompt")
+	if got := len(m.queuedRequests); got != 1 {
+		t.Fatalf("expected 1 queued request, got %d", got)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected input cleared after queue, got %q", got)
+	}
+	if got := len(m.inputHistory); got != 1 || m.inputHistory[0] != "queued prompt" {
+		t.Fatalf("expected input history updated, got %+v", m.inputHistory)
+	}
+}
+
+func TestEscCancelsWhileAgentRunning(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+	m = applyWindowSize(t, m)
+	m.loading = true
+
+	canceled := false
+	m.activeCancel = func() { canceled = true }
+
+	m = pressKey(t, m, tea.KeyEsc)
+	if !canceled {
+		t.Fatalf("expected cancel func to be invoked")
+	}
+	if !m.cancelQueued {
+		t.Fatalf("expected cancelQueued to be set")
+	}
+	if got := m.loadingText; got != "canceling..." {
+		t.Fatalf("expected cancel loading text, got %q", got)
+	}
+}
+
+func TestPermissionsPickerCommandAndSelection(t *testing.T) {
+	m := NewMainModel(nil, app.ModeCreate)
+	m = applyWindowSize(t, m)
+
+	m = sendEnter(t, m, "/permissions")
+	if !m.permissionsPickerActive {
+		t.Fatalf("expected permissions picker to open after /permissions")
+	}
+	if m.permissionsPickerIndex != 0 {
+		t.Fatalf("expected default picker index 0, got %d", m.permissionsPickerIndex)
+	}
+
+	m = pressKey(t, m, tea.KeyDown)
+	if m.permissionsPickerIndex != 1 {
+		t.Fatalf("expected picker index 1 after down, got %d", m.permissionsPickerIndex)
+	}
+
+	m = pressKey(t, m, tea.KeyEnter)
+	if m.permissionsPickerActive {
+		t.Fatalf("expected permissions picker to close after selecting")
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.Content != "permissions set to dangerously-full-access" {
+		t.Fatalf("unexpected final message: %q", last.Content)
+	}
+}

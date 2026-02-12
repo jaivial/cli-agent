@@ -193,22 +193,22 @@ func (s *SetupWizard) View() string {
 	}
 
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true)
 
 	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6272A4"))
+		Foreground(lipgloss.Color(colorMuted))
 
 	inputBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#BD93F9")).
+		BorderForeground(lipgloss.Color(colorAccent2)).
 		Padding(0, 1)
 
 	errorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF5555"))
+		Foreground(lipgloss.Color(colorError))
 
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#44475A"))
+		Foreground(lipgloss.Color(colorSubtle))
 
 	var b strings.Builder
 

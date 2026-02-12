@@ -1,0 +1,38 @@
+job_name: tbench2-all-glm47-coding-v19-failures
+
+# Give slow environment starts (image pulls) more room on heavy tasks.
+timeout_multiplier: 3.0
+
+orchestrator:
+  n_concurrent_trials: 1
+
+agents:
+  - import_path: eai_agent.agent:EaiAgent
+    kwargs:
+      max_loops: 60
+      base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+      model: glm-4.7
+      max_tokens: 4096
+
+datasets:
+  - registry:
+      url: https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json
+    name: terminal-bench
+    version: "2.0"
+    task_names:
+      - caffe-cifar-10
+      - train-fasttext
+      - tune-mjcf
+      - qemu-startup
+      - qemu-alpine-ssh
+      - install-windows-3.11
+      - hf-model-inference
+      - pytorch-model-recovery
+      - mteb-retrieve
+      - mteb-leaderboard
+      - fix-ocaml-gc
+
+environment:
+  type: docker
+  delete: false
+

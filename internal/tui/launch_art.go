@@ -79,8 +79,22 @@ func (m *MainModel) renderLaunchArt(width int) string {
 	titleBlock := strings.Join(titleLines, "\n")
 
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true)
+
+	// Subtle startup shimmer for a more "Cupertino" feel.
+	if m.animEnabled && !m.startupUntil.IsZero() && time.Now().Before(m.startupUntil) {
+		base := blendHex(colorAccent, colorAccent2, 0.25)
+		highlight := colorFg
+		styled := make([]string, 0, len(titleLines))
+		for i, line := range titleLines {
+			styled = append(styled, shimmerText(line, m.spinnerPos+i*2, base, highlight))
+		}
+		return lipgloss.NewStyle().
+			Width(width).
+			Align(lipgloss.Center).
+			Render(strings.Join(styled, "\n"))
+	}
 
 	return lipgloss.NewStyle().
 		Width(width).

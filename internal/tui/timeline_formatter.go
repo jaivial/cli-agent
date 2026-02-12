@@ -41,6 +41,10 @@ func FormatTimeline(events []app.ProgressEvent) string {
 			}
 			entry = timelineEntry{Group: "Thinking", Detail: detail}
 			ok = true
+		case "file_edit":
+			continue
+		case "tool_output":
+			continue
 		case "tool":
 			status := strings.ToLower(strings.TrimSpace(ev.ToolStatus))
 			if status == "pending" || status == "running" || status == "in_progress" {

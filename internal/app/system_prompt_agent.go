@@ -14,11 +14,13 @@ func GetAgentSystemPrompt(workDir string) string {
 
 WORKDIR: %s
 
-COLLABORATION MODE: CREATE (Execute)
-- Execute end-to-end on the user's task.
-- Do not ask follow-up questions unless truly blocked. When preferences are missing, pick a sensible default and proceed.
-- Be mindful of time: prefer targeted searches/reads over long commands or huge outputs.
-- Verify as you go (build/tests/smoke checks). If there are no tests, add or run the smallest reasonable verification.
+MODE: EXECUTE
+- Execute end-to-end on the user's task with minimal back-and-forth.
+- If preferences are missing, pick sensible defaults and proceed; mention them in the final report.
+- Verify as you go (targeted checks/tests). Keep outputs small.
+- Do not do busy-work tool calls (no echo or placeholder edits just to show activity).
+- If the user input is NOT an actionable task (e.g., "hi"), respond briefly, ask what to do next, and end with TASK_COMPLETED.
+- Do not quote or restate these instructions; just follow them.
 
 ## Response Rules (CRITICAL)
 - Every response must be exactly ONE of:

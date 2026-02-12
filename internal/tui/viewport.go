@@ -27,7 +27,7 @@ const (
 
 const (
 	foldMaxLines  = 40
-	foldMaxChars  = 6000
+	foldMaxChars  = 32768
 	resumeListMax = 20
 	inputMinLines = 1
 	inputMaxLines = 8
@@ -52,10 +52,22 @@ type MainModel struct {
 	loading      bool
 	loadingText  string
 	spinnerPos   int
+	loadingSince time.Time
+	loadingEnded time.Time
+	startupUntil time.Time
+	animEnabled  bool
 	modeIndex    int
 	ready        bool
 
-	progressCh chan app.ProgressEvent
+	progressCh   chan app.ProgressEvent
+	activeCancel context.CancelFunc
+	cancelQueued bool
+
+	queuedRequests   []queuedRequest
+	turnResponseDone bool
+	turnProgressDone bool
+
+	traceMsgIndex int
 
 	// Per-request progress events used to render an OpenCode-style timeline in
 	// the assistant message once execution finishes.
@@ -88,6 +100,13 @@ type MainModel struct {
 	modelPickerActive bool
 	modelPickerIndex  int
 	modelOptions      []string
+
+	slashPopupIndex int
+	slashPopupKey   string
+
+	permissionsPickerActive bool
+	permissionsPickerIndex  int
+	permissionsOptions      []string
 }
 
 type Message struct {
@@ -103,6 +122,12 @@ type Message struct {
 	ChangeType string
 	OldContent string
 	NewContent string
+}
+
+type queuedRequest struct {
+	query    string
+	display  string
+	queuedAt time.Time
 }
 
 type spinMsg struct{}
@@ -125,7 +150,7 @@ type titleMsg struct {
 type resumeTickMsg struct{}
 
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-var modes = []app.Mode{app.ModePlan, app.ModeCreate}
+var modes = []app.Mode{app.ModeDo}
 
 func looksLikeWebsiteHTMLRequest(query string) bool {
 	s := strings.ToLower(strings.TrimSpace(query))
@@ -148,8 +173,11 @@ func looksLikeWebsiteHTMLRequest(query string) bool {
 }
 
 func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
+	// The TUI always runs the tool-driven agent loop (like `eai agent`).
+	mode = app.ModeDo
+
 	ta := textarea.New()
-	ta.Placeholder = "message... (up/down: history, shift+tab: mode, enter: send)"
+	ta.Placeholder = "message... (/ commands, esc cancel, enter send)"
 	ta.Focus()
 	ta.CharLimit = 8000
 	ta.SetWidth(60)
@@ -160,8 +188,8 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	// Minimal transparent styling
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 
@@ -197,12 +225,16 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 		loading:            false,
 		loadingText:        "thinking...",
 		ready:              false,
+		startupUntil:       time.Now().Add(time.Millisecond * defaultStartupShimmer),
+		animEnabled:        animationsEnabled(),
 		stickToBottom:      true,
 		expandedMessageIDs: make(map[string]bool),
 		showBanner:         application != nil && application.Config.ShowBanner,
 		verbosity:          verbosity,
 		timelineEnabled:    timelineEnabled,
 		modelOptions:       append([]string(nil), app.SupportedModels...),
+		permissionsOptions: []string{app.PermissionsFullAccess, app.PermissionsDangerouslyFullAccess},
+		traceMsgIndex:      -1,
 	}
 	if m.verbosity == "" {
 		m.verbosity = "compact"
@@ -216,7 +248,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	m.messages = append(m.messages, Message{
 		ID:        "welcome-1",
 		Role:      "system",
-		Content:   "eai ready. enter to send, shift+tab to change mode. type /model, /resume, or /permissions.",
+		Content:   "eai ready. enter sends (queues while running). esc cancels. type / for commands.",
 		Timestamp: time.Now(),
 	})
 	m.recomputeInputHeight()
@@ -227,6 +259,9 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 func (m *MainModel) Init() tea.Cmd {
 	if m.resumePickerActive {
 		return tea.Batch(textarea.Blink, m.resumeTick())
+	}
+	if m.animEnabled {
+		return tea.Batch(textarea.Blink, m.spinTick())
 	}
 	return textarea.Blink
 }
@@ -269,6 +304,18 @@ func (m *MainModel) persistSessionMessage(role, content string) {
 	_ = m.app.AppendSessionMessage(m.session.ID, role, content, m.mode, m.sessionWorkDir())
 }
 
+func (m *MainModel) maybeStartNextQueued() tea.Cmd {
+	if m.loading || !m.turnResponseDone || !m.turnProgressDone || m.planDecisionActive {
+		return nil
+	}
+	if len(m.queuedRequests) == 0 {
+		return nil
+	}
+	next := m.queuedRequests[0]
+	m.queuedRequests = m.queuedRequests[1:]
+	return m.submitUserRequest(next.query, next.display)
+}
+
 func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -309,9 +356,25 @@ func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 	m.loading = true
 	m.spinnerPos = 0
 	m.loadingText = "thinking..."
+	m.loadingSince = time.Now()
+	m.loadingEnded = time.Time{}
 	m.turnProgress = nil
 	m.turnEvents = nil
 	m.turnProgressFrom = time.Now()
+	m.turnResponseDone = false
+	m.turnProgressDone = false
+	m.cancelQueued = false
+	m.traceMsgIndex = -1
+	if m.activeCancel != nil {
+		// Defensive: ensure any previous cancel func doesn't linger.
+		m.activeCancel()
+		m.activeCancel = nil
+	}
+
+	m.startTurnTrace()
+	m.updateTurnTrace(true)
+
+	m.applyLayout()
 	m.updateViewport()
 	m.viewport.GotoBottom()
 	m.stickToBottom = true
@@ -319,10 +382,14 @@ func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 
 	// Stream step updates while the agent runs.
 	m.progressCh = make(chan app.ProgressEvent, 256)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.activeCancel = cancel
 	cmds := []tea.Cmd{
-		m.sendMessageWithProgress(query, m.progressCh),
+		m.sendMessageWithProgress(ctx, query, m.progressCh),
 		m.waitForProgress(m.progressCh),
-		m.spinTick(),
+	}
+	if m.animEnabled {
+		cmds = append(cmds, m.spinTick())
 	}
 
 	// If we don't have a title yet, try to generate one asynchronously.
@@ -373,6 +440,9 @@ func (m *MainModel) applySession(sess *app.Session, msgs []app.StoredMessage) {
 	m.turnProgressFrom = time.Time{}
 	m.loading = false
 	m.loadingText = "thinking..."
+	m.loadingSince = time.Time{}
+	m.loadingEnded = time.Time{}
+	m.traceMsgIndex = -1
 	m.updateViewport()
 	m.viewport.GotoBottom()
 	m.stickToBottom = true
@@ -503,6 +573,12 @@ func (m *MainModel) inputAreaHeight() int {
 			height += pickerHeight + 1
 		}
 	}
+	if popupHeight := lipgloss.Height(m.renderSlashPopup()); popupHeight > 0 {
+		height += popupHeight + 1
+	}
+	if pickerHeight := lipgloss.Height(m.renderPermissionsPicker()); pickerHeight > 0 {
+		height += pickerHeight + 1
+	}
 	return height
 }
 
@@ -546,6 +622,7 @@ func (m *MainModel) resetInput() {
 	m.historyIndex = -1
 	m.historyDraft = ""
 	m.input.Reset()
+	m.updateSlashPopupState()
 	if m.recomputeInputHeight() {
 		m.applyLayout()
 	}
@@ -606,6 +683,7 @@ func (m *MainModel) rebuildInputHistoryFromMessages() {
 func (m *MainModel) setInputValue(value string) {
 	m.input.SetValue(value)
 	m.input.CursorEnd()
+	m.updateSlashPopupState()
 	if m.recomputeInputHeight() {
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
 		m.applyLayout()
@@ -767,8 +845,8 @@ func (m *MainModel) renderScrollbar(height int) string {
 		thumbTop = height - thumbH
 	}
 
-	track := lipgloss.NewStyle().Foreground(lipgloss.Color("#44475A")).Render("│")
-	thumb := lipgloss.NewStyle().Foreground(lipgloss.Color("#BD93F9")).Render("█")
+	track := lipgloss.NewStyle().Foreground(lipgloss.Color(colorBorderSoft)).Render("│")
+	thumb := lipgloss.NewStyle().Foreground(lipgloss.Color(colorScrollbar)).Render("█")
 
 	lines := make([]string, 0, height)
 	for i := 0; i < height; i++ {
@@ -792,6 +870,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.recomputeInputHeight()
 		m.applyLayout()
+		if m.loading {
+			m.updateTurnTrace(true)
+		}
 		m.updateViewport()
 		// Default to most recent messages on first render, but don't yank the
 		// viewport if the user has scrolled up.
@@ -894,6 +975,61 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.permissionsPickerActive {
+			switch {
+			case key.Matches(msg, m.help.keys.Quit):
+				return m, tea.Quit
+			}
+
+			switch msg.String() {
+			case "up", "k":
+				if len(m.permissionsOptions) > 0 {
+					m.permissionsPickerIndex--
+					if m.permissionsPickerIndex < 0 {
+						m.permissionsPickerIndex = len(m.permissionsOptions) - 1
+					}
+				}
+				return m, nil
+			case "down", "j":
+				if len(m.permissionsOptions) > 0 {
+					m.permissionsPickerIndex = (m.permissionsPickerIndex + 1) % len(m.permissionsOptions)
+				}
+				return m, nil
+			}
+
+			switch msg.Type {
+			case tea.KeyEsc:
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				m.closePermissionsPicker()
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+				}
+				return m, nil
+			case tea.KeyEnter:
+				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+				selected := m.selectPermissionsAt(m.permissionsPickerIndex)
+				m.closePermissionsPicker()
+				if selected != "" {
+					m.messages = append(m.messages, Message{
+						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+						Role:      "system",
+						Content:   "permissions set to " + selected,
+						Timestamp: time.Now(),
+					})
+				}
+				m.applyLayout()
+				m.updateViewport()
+				if wasAtBottom {
+					m.viewport.GotoBottom()
+				}
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
 		if m.planDecisionActive {
 			switch msg.String() {
 			case "up", "k":
@@ -914,6 +1050,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.stickToBottom || m.viewport.AtBottom() {
 					m.viewport.GotoBottom()
 				}
+				if cmd := m.maybeStartNextQueued(); cmd != nil {
+					return m, cmd
+				}
 				return m, nil
 			case tea.KeyEnter:
 				choice := m.planDecisionChoice
@@ -929,6 +1068,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewport.GotoBottom()
 				}
 				if choice == planDecisionNo {
+					if cmd := m.maybeStartNextQueued(); cmd != nil {
+						return m, cmd
+					}
 					return m, nil
 				}
 				m.mode = app.ModeCreate
@@ -939,6 +1081,41 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, m.submitUserRequest(buildPlanImplementationPrompt(planText, planContext), "Implement this approved plan")
+			}
+		}
+
+		if msg.Type == tea.KeyEsc && m.loading {
+			if m.activeCancel != nil && !m.cancelQueued {
+				m.cancelQueued = true
+				m.loadingText = "canceling..."
+				m.activeCancel()
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content:   "cancel requested (esc).",
+					Timestamp: time.Now(),
+				})
+				m.updateViewport()
+				if m.stickToBottom || m.viewport.AtBottom() {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+			}
+			return m, nil
+		}
+
+		if items := m.slashPopupItems(); len(items) > 0 {
+			switch msg.String() {
+			case "up":
+				m.slashPopupIndex--
+				if m.slashPopupIndex < 0 {
+					m.slashPopupIndex = len(items) - 1
+				}
+				return m, nil
+			case "down":
+				m.slashPopupIndex = (m.slashPopupIndex + 1) % len(items)
+				return m, nil
 			}
 		}
 
@@ -957,18 +1134,35 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.help.keys.Quit):
 			return m, tea.Quit
 
-		case key.Matches(msg, m.help.keys.NextMode):
-			m.modeIndex = (m.modeIndex + 1) % len(modes)
-			m.mode = modes[m.modeIndex]
-			// Don't add mode change to chat, just update the header
-			return m, nil
-
 		case key.Matches(msg, m.help.keys.Enter):
 			if m.input.Value() == "" {
 				return m, nil
 			}
 
 			input := strings.TrimSpace(m.input.Value())
+			if items := m.slashPopupItems(); len(items) > 0 {
+				idx := m.slashPopupIndex
+				if idx < 0 || idx >= len(items) {
+					idx = 0
+				}
+				insert := strings.TrimSpace(items[idx].InsertText)
+				if insert != "" && !strings.EqualFold(strings.TrimSpace(input), insert) {
+					m.setInputValue(insert)
+					return m, nil
+				}
+			}
+
+			if strings.EqualFold(strings.TrimSpace(input), "/permissions") {
+				m.resetInput()
+				m.openPermissionsPicker()
+				m.applyLayout()
+				m.updateViewport()
+				if m.stickToBottom || m.viewport.AtBottom() {
+					m.viewport.GotoBottom()
+				}
+				return m, nil
+			}
+
 			if handled, content, role := m.handlePermissionsCommand(input); handled {
 				m.messages = append(m.messages, Message{
 					ID:        fmt.Sprintf("%s-%d", role, time.Now().UnixNano()),
@@ -982,6 +1176,22 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.HasPrefix(input, "/connect") {
+				if m.loading {
+					m.messages = append(m.messages, Message{
+						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+						Role:      "system",
+						Content:   "command unavailable while agent is running. press esc to cancel first.",
+						Timestamp: time.Now(),
+					})
+					m.resetInput()
+					m.updateViewport()
+					if m.stickToBottom || m.viewport.AtBottom() {
+						m.viewport.GotoBottom()
+						m.stickToBottom = true
+						m.unseenCount = 0
+					}
+					return m, nil
+				}
 				cfg, _ := app.LoadConfig(app.DefaultConfigPath())
 				wizard := NewSetupWizard(&cfg)
 				p := tea.NewProgram(wizard)
@@ -1019,6 +1229,22 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.HasPrefix(strings.ToLower(input), "/resume") {
+				if m.loading {
+					m.messages = append(m.messages, Message{
+						ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+						Role:      "system",
+						Content:   "command unavailable while agent is running. press esc to cancel first.",
+						Timestamp: time.Now(),
+					})
+					m.resetInput()
+					m.updateViewport()
+					if m.stickToBottom || m.viewport.AtBottom() {
+						m.viewport.GotoBottom()
+						m.stickToBottom = true
+						m.unseenCount = 0
+					}
+					return m, nil
+				}
 				sid := strings.TrimSpace(input[len("/resume"):])
 				m.resetInput()
 				if sid != "" {
@@ -1039,6 +1265,38 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openResumePicker()
 				return m, m.resumeTick()
 			}
+
+			if m.loading {
+				// Avoid starting concurrent agent runs; queue user turns instead.
+				m.pushInputHistory(input)
+				m.queuedRequests = append(m.queuedRequests, queuedRequest{
+					query:    input,
+					display:  input,
+					queuedAt: time.Now(),
+				})
+				preview := strings.TrimSpace(input)
+				if i := strings.IndexByte(preview, '\n'); i >= 0 {
+					preview = preview[:i]
+				}
+				if len(preview) > 80 {
+					preview = preview[:77] + "..."
+				}
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content:   fmt.Sprintf("queued (%d): %s", len(m.queuedRequests), preview),
+					Timestamp: time.Now(),
+				})
+				m.resetInput()
+				m.updateViewport()
+				if m.stickToBottom || m.viewport.AtBottom() {
+					m.viewport.GotoBottom()
+					m.stickToBottom = true
+					m.unseenCount = 0
+				}
+				return m, nil
+			}
+
 			m.pushInputHistory(input)
 			m.resetInput()
 			return m, m.submitUserRequest(input, input)
@@ -1048,6 +1306,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.planDecisionActive = false
 			m.planDecisionChoice = planDecisionYes
 			m.pendingPlanText = ""
+			m.traceMsgIndex = -1
 			if m.session != nil && m.app.Memory != nil {
 				_ = m.app.Memory.ClearSessionMessages(m.session.ID)
 				m.session.Title = ""
@@ -1121,38 +1380,54 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case aiResponseMsg:
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+		canceled := m.cancelQueued
 		m.loading = false
-		if msg.err != nil {
+		m.loadingEnded = time.Now()
+		m.turnResponseDone = true
+		if m.activeCancel != nil {
+			m.activeCancel()
+			m.activeCancel = nil
+		}
+		if canceled && msg.err == nil {
+			// The user requested cancellation; discard any late-arriving successful response.
 			m.messages = append(m.messages, Message{
-				ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-				Role:      "error",
-				Content:   fmt.Sprintf("error: %v", msg.err),
+				ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+				Role:      "system",
+				Content:   "canceled.",
 				Timestamp: time.Now(),
 			})
+		} else if msg.err != nil {
+			errLower := strings.ToLower(msg.err.Error())
+			if strings.Contains(errLower, "context canceled") || strings.Contains(errLower, "operation was canceled") {
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+					Role:      "system",
+					Content:   "canceled.",
+					Timestamp: time.Now(),
+				})
+			} else {
+				m.messages = append(m.messages, Message{
+					ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
+					Role:      "error",
+					Content:   fmt.Sprintf("error: %v", msg.err),
+					Timestamp: time.Now(),
+				})
+			}
 		} else {
 			assistantContent := msg.response
-			isPlan := false
-			if display, planText, ok := buildPlanDisplayIfApplicable(m.mode, msg.response); ok {
-				assistantContent = display
-				isPlan = true
-				m.planDecisionActive = true
-				m.planDecisionChoice = planDecisionYes
-				m.pendingPlanText = planText
-				m.pendingPlanContext = buildPlanContextForExecution(m.turnEvents)
-				m.applyLayout()
-			}
 			m.messages = append(m.messages, Message{
 				ID:        fmt.Sprintf("ai-%d", time.Now().UnixNano()),
 				Role:      "assistant",
 				Content:   assistantContent,
-				IsPlan:    isPlan,
 				Timestamp: time.Now(),
 			})
 			m.persistSessionMessage("assistant", assistantContent)
 		}
+		m.updateTurnTrace(false)
 		m.turnProgress = nil
 		m.turnEvents = nil
 		m.turnProgressFrom = time.Time{}
+		m.applyLayout()
 		m.updateViewport()
 		if wasAtBottom {
 			m.viewport.GotoBottom()
@@ -1161,6 +1436,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.unseenCount++
 		}
+		if cmd := m.maybeStartNextQueued(); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 
 	case progressUpdateMsg:
@@ -1168,55 +1446,44 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ev.At.IsZero() {
 			ev.At = time.Now()
 		}
-		// Ignore straggler updates that arrive after the assistant response.
-		if !m.loading {
-			return m, m.waitForProgress(m.progressCh)
-		}
 		m.turnEvents = append(m.turnEvents, ev)
-		if m.timelineEnabled && strings.TrimSpace(ev.Kind) != "" {
+		kind := strings.ToLower(strings.TrimSpace(ev.Kind))
+		if kind == "file_edit" {
+			path := strings.TrimSpace(ev.Path)
+			if path == "" {
+				path = "(unknown path)"
+			}
+			changeType := strings.ToLower(strings.TrimSpace(ev.ChangeType))
+			if changeType == "" {
+				changeType = "modify"
+			}
+			m.AddFileEdit(path, changeType, ev.OldContent, ev.NewContent)
+		}
+		if m.timelineEnabled && kind != "" && kind != "tool_output" {
 			m.turnProgress = append(m.turnProgress, ev)
 		}
-		kind := strings.ToLower(strings.TrimSpace(ev.Kind))
-		showStatusLine := true
-		if m.mode == app.ModePlan && kind == "reasoning" {
-			showStatusLine = false
-		}
-		if showStatusLine {
-			if line := strings.TrimSpace(FormatProgressEventForChat(ev)); line != "" {
-				duplicate := false
-				if n := len(m.messages); n > 0 {
-					last := m.messages[n-1]
-					duplicate = last.IsStatus && strings.TrimSpace(last.Content) == line
-				}
-				if !duplicate {
-					role := "system"
-					if strings.EqualFold(ev.ToolStatus, "error") || strings.EqualFold(ev.Kind, "error") {
-						role = "error"
-					}
-					m.messages = append(m.messages, Message{
-						ID:        fmt.Sprintf("status-%d", time.Now().UnixNano()),
-						Role:      role,
-						Content:   line,
-						Timestamp: ev.At,
-						IsStatus:  true,
-					})
-					m.updateViewport()
-					if m.stickToBottom || m.viewport.AtBottom() {
-						m.viewport.GotoBottom()
-						m.stickToBottom = true
-						m.unseenCount = 0
-					}
-				}
+		if kind != "tool_output" {
+			txt := strings.TrimSpace(ev.Text)
+			if txt != "" {
+				m.loadingText = txt
 			}
 		}
-		txt := strings.TrimSpace(ev.Text)
-		if txt != "" {
-			m.loadingText = txt
+		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+		m.updateTurnTrace(true)
+		m.updateViewport()
+		if wasAtBottom {
+			m.viewport.GotoBottom()
+			m.stickToBottom = true
+			m.unseenCount = 0
 		}
 		return m, m.waitForProgress(m.progressCh)
 
 	case progressDoneMsg:
 		m.progressCh = nil
+		m.turnProgressDone = true
+		if cmd := m.maybeStartNextQueued(); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 
 	case titleMsg:
@@ -1236,8 +1503,21 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinMsg:
-		m.spinnerPos = (m.spinnerPos + 1) % len(spinner)
-		if m.loading {
+		m.spinnerPos++
+		if m.spinnerPos > 1_000_000 {
+			m.spinnerPos = 0
+		}
+		if m.animEnabled && m.loading {
+			wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+			m.updateTurnTrace(true)
+			m.updateViewport()
+			if wasAtBottom {
+				m.viewport.GotoBottom()
+				m.stickToBottom = true
+				m.unseenCount = 0
+			}
+		}
+		if m.animEnabled && m.shouldKeepAnimating() {
 			return m, m.spinTick()
 		}
 	}
@@ -1245,6 +1525,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
+	m.updateSlashPopupState()
 	if m.recomputeInputHeight() {
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
 		m.applyLayout()
@@ -1271,13 +1552,16 @@ func (m *MainModel) updateViewport() {
 	var b strings.Builder
 	chatWidth := m.chatAreaWidth() - 2
 
-	for i, msg := range m.messages {
-		var prev *Message
-		if i > 0 {
-			prev = &m.messages[i-1]
+	var prev *Message
+	for i := range m.messages {
+		msg := m.messages[i]
+		rendered := strings.TrimRight(m.renderMessage(prev, msg, chatWidth), "\n")
+		if strings.TrimSpace(rendered) == "" {
+			continue
 		}
-		b.WriteString(m.renderMessage(prev, msg, chatWidth))
+		b.WriteString(rendered)
 		b.WriteString("\n")
+		prev = &m.messages[i]
 	}
 	if m.shouldRenderLaunchArt() {
 		if art := strings.TrimSpace(m.renderLaunchArt(chatWidth)); art != "" {
@@ -1338,27 +1622,33 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 	var textColor lipgloss.Color
 	var roleLabel string
 	var alignRight bool
+	var roleColor string
 
 	switch msg.Role {
 	case "user":
-		textColor = lipgloss.Color("#8BE9FD") // Cyan for user
+		textColor = lipgloss.Color(colorFg)
 		roleLabel = "you"
+		roleColor = colorAccent
 		alignRight = true // User messages right
 	case "assistant":
-		textColor = lipgloss.Color("#50FA7B") // Green for AI
+		textColor = lipgloss.Color(colorFg)
 		roleLabel = "eai"
+		roleColor = colorAccent2
 		alignRight = false // AI messages left
 	case "system":
-		textColor = lipgloss.Color("#6272A4") // Gray for system
+		textColor = lipgloss.Color(colorMuted)
 		roleLabel = "sys"
+		roleColor = colorMuted
 		alignRight = false
 	case "error":
-		textColor = lipgloss.Color("#FF5555") // Red for errors
+		textColor = lipgloss.Color(colorError)
 		roleLabel = "err"
+		roleColor = colorError
 		alignRight = false
 	default:
-		textColor = lipgloss.Color("#F8F8F2")
+		textColor = lipgloss.Color(colorFg)
 		roleLabel = msg.Role
+		roleColor = colorMuted
 		alignRight = false
 	}
 
@@ -1369,20 +1659,12 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 
 	// Live status lines render inline in the chat zone without bubble framing.
 	if msg.IsStatus {
-		content := strings.TrimSpace(msg.Content)
+		content := strings.TrimRight(msg.Content, "\n")
+		content = strings.TrimSpace(content)
 		if content == "" {
 			return ""
 		}
-		maxW := width - 2
-		if maxW < 10 {
-			maxW = width
-		}
-		content = wrap.String(content, maxW)
-		lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-		if msg.Role == "error" {
-			lineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
-		}
-		return lineStyle.Render(content)
+		return content
 	}
 
 	// System messages: keep compact and centered.
@@ -1411,8 +1693,8 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 		}
 
 		bubbleStyle := lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#FFB86C")).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(colorAccent)).
 			Padding(0, 1).
 			Width(bubbleW)
 		contentW := bubbleW - bubbleStyle.GetHorizontalFrameSize()
@@ -1437,8 +1719,9 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 		var out strings.Builder
 		if shouldShowMessageHeader(prev, msg) {
 			timestamp := msg.Timestamp.Format("15:04")
-			headerText := fmt.Sprintf("%s %s", roleLabel, timestamp)
-			header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render(headerText)
+			roleStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(roleColor)).Bold(true).Render(roleLabel)
+			timeStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted)).Render(timestamp)
+			header := roleStyled + " " + timeStyled
 			out.WriteString(alignStyle.Render(header))
 			out.WriteString("\n")
 		}
@@ -1457,12 +1740,15 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 		bubbleW = width
 	}
 
-	borderColor := lipgloss.Color("#44475A")
+	borderColor := lipgloss.Color(colorBorder)
 	if msg.Role == "user" {
-		borderColor = lipgloss.Color("#6272A4")
+		borderColor = lipgloss.Color(colorAccent)
 	}
 	if msg.Role == "error" {
-		borderColor = lipgloss.Color("#FF5555")
+		borderColor = lipgloss.Color(colorError)
+	}
+	if msg.Role == "assistant" {
+		borderColor = lipgloss.Color(colorBorder)
 	}
 
 	bubbleStyle := lipgloss.NewStyle().
@@ -1493,7 +1779,7 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 				content = strings.Join(lines[:foldMaxLines], "\n")
 				hint := fmt.Sprintf("… (+%d lines, alt+e to expand)", hidden)
 				hintStyled := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#6272A4")).
+					Foreground(lipgloss.Color(colorMuted)).
 					Italic(true).
 					Render(hint)
 				content = content + "\n" + hintStyled
@@ -1516,8 +1802,9 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 	var out strings.Builder
 	if shouldShowMessageHeader(prev, msg) {
 		timestamp := msg.Timestamp.Format("15:04")
-		headerText := fmt.Sprintf("%s %s", roleLabel, timestamp)
-		header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render(headerText)
+		roleStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(roleColor)).Bold(true).Render(roleLabel)
+		timeStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted)).Render(timestamp)
+		header := roleStyled + " " + timeStyled
 		out.WriteString(alignStyle.Render(header))
 		out.WriteString("\n")
 	}
@@ -1528,7 +1815,7 @@ func (m *MainModel) renderMessage(prev *Message, msg Message, width int) string 
 func (m *MainModel) View() string {
 	if m.width < minWidth || m.height < minHeight {
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")).
+			Foreground(lipgloss.Color(colorError)).
 			Render(fmt.Sprintf("resize to %dx%d (current: %dx%d)", minWidth, minHeight, m.width, m.height))
 	}
 
@@ -1579,7 +1866,7 @@ func (m *MainModel) renderHeader() string {
 	}
 
 	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#44475A")).
+		Foreground(lipgloss.Color(colorBorderSoft)).
 		Render(strings.Repeat("─", m.width))
 	return lipgloss.JoinVertical(lipgloss.Left, GetBanner(m.width), separator)
 }
@@ -1594,22 +1881,30 @@ func (m *MainModel) renderStatusBar() string {
 	if !m.stickToBottom && m.unseenCount > 0 {
 		newInfo = fmt.Sprintf("new:%d ", m.unseenCount)
 	}
-	rightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-	rightText := newInfo + scrollInfo + time.Now().Format("15:04")
+	queueInfo := ""
+	if len(m.queuedRequests) > 0 {
+		queueInfo = fmt.Sprintf("q:%d ", len(m.queuedRequests))
+	}
+	cancelInfo := ""
+	if m.loading && m.cancelQueued {
+		cancelInfo = "canceling "
+	}
+	rightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	rightText := newInfo + queueInfo + scrollInfo + cancelInfo + time.Now().Format("15:04")
 	right := rightStyle.Render(rightText)
 
 	brandStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFB86C")).
+		Foreground(lipgloss.Color(colorAccent)).
 		Bold(true)
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F8F8F2")).
+		Foreground(lipgloss.Color(colorFg)).
 		Bold(true)
 	metaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6272A4"))
+		Foreground(lipgloss.Color(colorMuted))
 
 	sep := metaStyle.Render(" · ")
 	brand := brandStyle.Render("eai")
-	mode := metaStyle.Render(string(m.mode))
+	mode := metaStyle.Render("agent")
 	verb := metaStyle.Render(m.verbosity)
 
 	title := strings.TrimSpace(m.title)
@@ -1660,64 +1955,60 @@ func (m *MainModel) renderStatusBar() string {
 		line2Text = truncate.StringWithTail(line2Text, uint(m.width), "…")
 	}
 	line2 := rightStyle.Render(line2Text)
-	if !m.loading {
-		return line1 + "\n" + line2
-	}
-
-	loadingText := strings.TrimSpace(m.loadingText)
-	if loadingText == "" {
-		loadingText = "thinking..."
-	}
-	cubes := m.renderLoadingCubes(10)
-	cubeWidth := lipgloss.Width(cubes)
-	maxText := m.width - cubeWidth - 2
-	if maxText < 8 {
-		maxText = 8
-	}
-	loadingText = truncate.StringWithTail(loadingText, uint(maxText), "…")
-	loadingLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#BD93F9")).
-		Render(loadingText + "  " + cubes)
-	return line1 + "\n" + line2 + "\n" + loadingLine
+	return line1 + "\n" + line2
 }
 
-func (m *MainModel) renderLoadingCubes(count int) string {
-	if count <= 0 {
-		count = 10
-	}
-	if count == 1 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#BD93F9")).Render("■")
+func (m *MainModel) renderLoadingDots(alpha float64) string {
+	alpha = clamp01(alpha)
+	active := 0
+	if m.spinnerPos >= 0 {
+		frames := 2000 / defaultAnimTick
+		if frames < 3 {
+			frames = 3
+		}
+		step := frames / 3
+		if step < 1 {
+			step = 1
+		}
+		active = (m.spinnerPos / step) % 3
 	}
 
-	active := m.spinnerPos % count
-	steps := []string{
-		"#BD93F9",
-		"#A884EC",
-		"#8C73D9",
-		"#6D5FB6",
-		"#4C496E",
-	}
+	base := blendHex(colorSubtle, colorMuted, alpha)
+	hi := blendHex(colorSubtle, colorAccent, alpha)
+	mid := blendHex(base, hi, 0.45)
+
+	colors := [3]string{base, base, base}
+	colors[active] = hi
+	colors[(active+1)%3] = mid
 
 	var b strings.Builder
-	for i := 0; i < count; i++ {
-		dist := i - active
-		if dist < 0 {
-			dist = -dist
-		}
-		if dist > count-dist {
-			dist = count - dist
-		}
-		colorIndex := len(steps) - 1
-		if dist < len(steps) {
-			colorIndex = dist
-		}
-		cube := lipgloss.NewStyle().Foreground(lipgloss.Color(steps[colorIndex])).Render("■")
-		b.WriteString(cube)
-		if i < count-1 {
+	for i := 0; i < 3; i++ {
+		if i > 0 {
 			b.WriteString(" ")
 		}
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colors[i])).Render("●"))
 	}
 	return b.String()
+}
+
+func (m *MainModel) renderInputThinkingLine(width int) string {
+	if !m.loading {
+		return ""
+	}
+	if width < 20 {
+		width = 20
+	}
+
+	label := shimmerText("Thinking", m.spinnerPos, colorMuted, colorAccent2)
+	label = lipgloss.NewStyle().Italic(true).Render(label)
+	dots := m.renderLoadingDots(1)
+
+	gap := width - lipgloss.Width(label) - lipgloss.Width(dots)
+	if gap < 1 {
+		gap = 1
+	}
+	line := label + strings.Repeat(" ", gap) + dots
+	return line
 }
 
 func (m *MainModel) renderModelPicker() string {
@@ -1726,8 +2017,8 @@ func (m *MainModel) renderModelPicker() string {
 	}
 
 	var b strings.Builder
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C")).Render("select model")
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render("up/down to navigate, enter to select, esc to cancel")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent)).Render("select model")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted)).Render("up/down to navigate, enter to select, esc to cancel")
 	b.WriteString(title)
 	b.WriteString("\n")
 	b.WriteString(hint)
@@ -1737,9 +2028,9 @@ func (m *MainModel) renderModelPicker() string {
 		line := "  " + model
 		if i == m.modelPickerIndex {
 			line = "> " + model
-			line = lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Bold(true).Render(line)
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent2)).Bold(true).Render(line)
 		} else {
-			line = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2")).Render(line)
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color(colorFg)).Render(line)
 		}
 		b.WriteString(line)
 		if i < len(m.modelOptions)-1 {
@@ -1749,7 +2040,7 @@ func (m *MainModel) renderModelPicker() string {
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#44475A")).
+		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(0, 1).
 		Width(m.chatAreaWidth() - 2).
 		Render(b.String())
@@ -1758,19 +2049,34 @@ func (m *MainModel) renderModelPicker() string {
 func (m *MainModel) renderInputArea() string {
 	var result strings.Builder
 
-	// Reserve one spacer line above input for stable layout; live thinking and
-	// reasoning appear in the chat area as status lines.
-	result.WriteString("\n")
-
 	if picker := m.renderModelPicker(); picker != "" {
 		result.WriteString(picker)
 		result.WriteString("\n")
 	}
 
+	if popup := m.renderSlashPopup(); popup != "" {
+		result.WriteString(popup)
+		result.WriteString("\n")
+	}
+
+	if picker := m.renderPermissionsPicker(); picker != "" {
+		result.WriteString(picker)
+		result.WriteString("\n")
+	}
+
+	// Activity line (always reserved). While running, show an animated thinking
+	// indicator just above the input box.
+	activityW := m.chatAreaWidth() - 2
+	if activityW < 10 {
+		activityW = m.chatAreaWidth()
+	}
+	result.WriteString(m.renderInputThinkingLine(activityW))
+	result.WriteString("\n")
+
 	// Input box with thin border
 	inputBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#44475A")).
+		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(0, 1).
 		Width(m.chatAreaWidth() - 2).
 		Render(m.input.View())
@@ -1790,12 +2096,12 @@ func (m *MainModel) renderResumePicker() string {
 		totalHeight = 8
 	}
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-	selectStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Bold(true)
-	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	selectStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent2)).Bold(true)
+	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorFg))
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorError))
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Resume Session"))
@@ -1808,7 +2114,7 @@ func (m *MainModel) renderResumePicker() string {
 		b.WriteString("\n")
 		return lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#44475A")).
+			BorderForeground(lipgloss.Color(colorBorder)).
 			Padding(1, 1).
 			Width(m.chatAreaWidth()).
 			Height(totalHeight).
@@ -1881,7 +2187,7 @@ func (m *MainModel) renderResumePicker() string {
 	content := strings.TrimRight(b.String(), "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#44475A")).
+		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(1, 1).
 		Width(m.chatAreaWidth()).
 		Height(totalHeight).
@@ -1932,14 +2238,24 @@ func formatRelativeTime(now time.Time, t time.Time) string {
 }
 
 func (m *MainModel) spinTick() tea.Cmd {
-	return tea.Tick(time.Millisecond*80, func(_ time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*time.Duration(defaultAnimTick), func(_ time.Time) tea.Msg {
 		return spinMsg{}
 	})
 }
 
-func (m *MainModel) sendMessageWithProgress(query string, progressCh chan<- app.ProgressEvent) tea.Cmd {
+func (m *MainModel) shouldKeepAnimating() bool {
+	now := time.Now()
+	if m.loading {
+		return true
+	}
+	if !m.startupUntil.IsZero() && now.Before(m.startupUntil) && m.shouldRenderLaunchArt() {
+		return true
+	}
+	return false
+}
+
+func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, progressCh chan<- app.ProgressEvent) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
 		cb := func(app.ProgressEvent) {}
 		if progressCh != nil {
 			cb = func(ev app.ProgressEvent) {
@@ -1948,10 +2264,12 @@ func (m *MainModel) sendMessageWithProgress(query string, progressCh chan<- app.
 		}
 
 		sid := ""
+		workDir := ""
 		if m.session != nil {
 			sid = m.session.ID
+			workDir = m.sessionWorkDir()
 		}
-		response, err := m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, m.mode, query, cb)
+		response, err := m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb)
 		if progressCh != nil {
 			close(progressCh)
 		}
@@ -2054,17 +2372,6 @@ func (m *MainModel) AddFileEdit(filePath, changeType, oldContent, newContent str
 		NewContent: newContent,
 		Timestamp:  time.Now(),
 	})
-	m.updateViewport()
-	m.viewport.GotoBottom()
 }
 
-// Color constants - minimal palette
-const (
-	colorFg      = "#F8F8F2"
-	colorFgMuted = "#6272A4"
-	colorAccent  = "#FFB86C"
-	colorUser    = "#8BE9FD"
-	colorAI      = "#50FA7B"
-	colorError   = "#FF5555"
-	colorBorder  = "#44475A"
-)
+// Color/theme constants live in theme.go.

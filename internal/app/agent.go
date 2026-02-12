@@ -142,6 +142,22 @@ func isExplicitCompletion(response string) bool {
 	return false
 }
 
+func hasTaskCompletedSentinel(response string) bool {
+	response = strings.TrimSpace(response)
+	if response == "" {
+		return false
+	}
+	lines := strings.Split(response, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		return strings.EqualFold(line, "TASK_COMPLETED")
+	}
+	return false
+}
+
 func seemsLikeHTMLWebsiteTask(task string) bool {
 	s := strings.ToLower(strings.TrimSpace(task))
 	if s == "" {
@@ -388,6 +404,9 @@ type ProgressEvent struct {
 	ToolStatus string    `json:"tool_status,omitempty"`
 	Path       string    `json:"path,omitempty"`
 	Command    string    `json:"command,omitempty"`
+	ChangeType string    `json:"change_type,omitempty"`
+	OldContent string    `json:"old_content,omitempty"`
+	NewContent string    `json:"new_content,omitempty"`
 	DurationMs int64     `json:"duration_ms,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	At         time.Time `json:"at,omitempty"`
@@ -425,6 +444,10 @@ type AgentLoop struct {
 	SystemMessageBuilder   func(task string) string
 	FinalResponseValidator func(response string) bool
 	FinalResponseGuidance  string
+	// PreludeMessages, when set, are inserted after the system prompt and before
+	// the current user task. This is used by the TUI to provide lightweight
+	// "memory" without changing the agent system prompt.
+	PreludeMessages []AgentMessage
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -664,6 +687,25 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 		Timestamp: time.Now(),
 	})
 
+	// Optional: insert session "memory" messages (TUI), but keep them lightweight.
+	if len(l.PreludeMessages) > 0 {
+		for _, msg := range l.PreludeMessages {
+			role := strings.ToLower(strings.TrimSpace(msg.Role))
+			if role == "" {
+				role = "user"
+			}
+			content := strings.TrimSpace(msg.Content)
+			if content == "" {
+				continue
+			}
+			state.Messages = append(state.Messages, AgentMessage{
+				Role:      role,
+				Content:   content,
+				Timestamp: time.Now(),
+			})
+		}
+	}
+
 	userMsg := AgentMessage{
 		Role:      "user",
 		Content:   task,
@@ -803,12 +845,15 @@ loop:
 
 			// Check if model explicitly says task is complete
 			explicitlyComplete := isExplicitCompletion(response)
+			hasSentinel := hasTaskCompletedSentinel(response)
 
 			// Check if we've done any meaningful work
 			hasExecutedTools := len(state.Results) > 0
 
-			// If explicit completion and we've done work, verify and finish
-			if explicitlyComplete && hasExecutedTools {
+			// If the assistant declares completion, verify and finish.
+			// - Require actual tool work for completion phrasing without the TASK_COMPLETED sentinel.
+			// - Allow sentinel-only completion even if no tools ran (useful for trivial/non-actionable tasks).
+			if hasSentinel || (explicitlyComplete && hasExecutedTools) {
 				// Verify expected files exist before completing
 				if len(expectedFiles) > 0 {
 					existing, missing := verifyFilesExist(expectedFiles)
@@ -1310,12 +1355,105 @@ func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) 
 		return result
 	}
 
+	// Capture before/after file contents for UI-only diff rendering.
+	// Guard on l.Progress to avoid impacting non-interactive runs (tbench/cli).
+	var (
+		fileEditEnabled   = l.Progress != nil && isFileEditTool(call.Name)
+		fileEditPathArg   string
+		fileEditPathAbs   string
+		fileExistedBefore bool
+		oldContent        string
+		oldOK             bool
+	)
+	if fileEditEnabled {
+		pathArg, _ := l.toolProgressDetails(call)
+		fileEditPathArg = strings.TrimSpace(pathArg)
+		if fileEditPathArg != "" {
+			fileEditPathAbs = l.resolvePath(fileEditPathArg)
+			if _, err := os.Stat(fileEditPathAbs); err == nil {
+				fileExistedBefore = true
+				const maxDiffBytes = 32 * 1024
+				if txt, ok, _ := readFileAtMost(fileEditPathAbs, maxDiffBytes); ok {
+					oldContent = txt
+					oldOK = true
+				}
+			}
+		}
+	}
+
 	l.emitToolProgress(call, "pending", 0, "")
 	result := l.executeTool(ctx, call)
-	if result.Success {
-		l.emitToolProgress(call, "completed", result.DurationMs, "")
-	} else {
-		l.emitToolProgress(call, "error", result.DurationMs, result.Error)
+	status := "completed"
+	errText := ""
+	if !result.Success {
+		status = "error"
+		errText = result.Error
+	}
+	l.emitToolProgress(call, status, result.DurationMs, errText)
+
+	// Emit a small output preview for exec so the UI can show it under the command.
+	if call.Name == "exec" && strings.TrimSpace(result.Output) != "" {
+		if preview := summarizeToolOutputForProgress(result.Output); strings.TrimSpace(preview) != "" {
+			l.emitProgress(ProgressEvent{
+				Kind:       "tool_output",
+				Text:       preview,
+				Tool:       call.Name,
+				ToolCallID: call.ID,
+				ToolStatus: status,
+				DurationMs: result.DurationMs,
+			})
+		}
+	}
+
+	if fileEditEnabled && result.Success && fileEditPathAbs != "" {
+		changeType := "modify"
+		fileExistsAfter := false
+		newContent := ""
+		newOK := false
+
+		if _, err := os.Stat(fileEditPathAbs); err == nil {
+			fileExistsAfter = true
+			const maxDiffBytes = 32 * 1024
+			if txt, ok, _ := readFileAtMost(fileEditPathAbs, maxDiffBytes); ok {
+				newContent = txt
+				newOK = true
+			}
+		}
+
+		switch {
+		case !fileExistedBefore && fileExistsAfter:
+			changeType = "create"
+		case fileExistedBefore && !fileExistsAfter:
+			changeType = "delete"
+		default:
+			changeType = "modify"
+		}
+
+		// If we couldn't safely read contents (too large), still emit the edit event
+		// so the UI can show the file path without a diff.
+		if !oldOK {
+			oldContent = ""
+		}
+		if !newOK {
+			newContent = ""
+		}
+
+		pathForUI := fileEditPathArg
+		if strings.TrimSpace(pathForUI) == "" {
+			pathForUI = fileEditPathAbs
+		}
+
+		l.emitProgress(ProgressEvent{
+			Kind:       "file_edit",
+			Tool:       call.Name,
+			ToolCallID: call.ID,
+			ToolStatus: status,
+			Path:       pathForUI,
+			ChangeType: changeType,
+			OldContent: oldContent,
+			NewContent: newContent,
+			DurationMs: result.DurationMs,
+		})
 	}
 	return result
 }
@@ -1924,6 +2062,88 @@ func truncateToolOutput(s string) string {
 	// Keep the tail; that's where errors usually are.
 	tail := s[len(s)-maxBytes:]
 	return fmt.Sprintf("[output truncated: %d bytes -> %d bytes]\n%s", len(s), maxBytes, tail)
+}
+
+func summarizeToolOutputForProgress(output string) string {
+	output = strings.TrimRight(output, "\n")
+	if strings.TrimSpace(output) == "" {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	const maxLines = 12
+	if len(lines) <= maxLines {
+		return output
+	}
+	head := 3
+	tail := 3
+	if head+tail+1 > maxLines {
+		head = 2
+		tail = 2
+	}
+	if head+tail+1 > maxLines {
+		head = 1
+		tail = 1
+	}
+	if head+tail > len(lines) {
+		return output
+	}
+	omitted := len(lines) - head - tail
+	if omitted < 0 {
+		omitted = 0
+	}
+
+	var b strings.Builder
+	for i := 0; i < head && i < len(lines); i++ {
+		b.WriteString(lines[i])
+		b.WriteString("\n")
+	}
+	if omitted > 0 {
+		b.WriteString(fmt.Sprintf("… +%d lines\n", omitted))
+	}
+	for i := len(lines) - tail; i < len(lines); i++ {
+		if i < 0 {
+			continue
+		}
+		b.WriteString(lines[i])
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func isFileEditTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "write_file", "edit_file", "append_file", "patch_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func readFileAtMost(path string, maxBytes int64) (content string, ok bool, err error) {
+	if maxBytes <= 0 {
+		return "", false, fmt.Errorf("maxBytes must be > 0")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false, err
+	}
+	if info.IsDir() {
+		return "", false, fmt.Errorf("path is a directory: %s", path)
+	}
+	if info.Size() > maxBytes {
+		return "", false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	if int64(len(data)) > maxBytes {
+		return "", false, nil
+	}
+	if isProbablyBinary(data) {
+		return "", false, nil
+	}
+	return string(data), true, nil
 }
 
 func isProbablyBinary(data []byte) bool {

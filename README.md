@@ -34,6 +34,17 @@ go build -o /usr/local/bin/eai ./cmd/eai/
 chmod +x /usr/local/bin/eai
 ```
 
+### Ejecutar localmente (sin instalar globalmente)
+
+```bash
+# Desde la raíz del repo
+go build -o ./eai ./cmd/eai/
+./eai
+
+# Alternativa (rápido, sin binario)
+go run ./cmd/eai/
+```
+
 ### Opción 3: Fedora (primera instalación)
 
 ```bash
@@ -155,12 +166,30 @@ python3 terminal_bench_harness.py ./bin/eai
 
 ### Terminal-Bench 2.0 (Harbor, oficial)
 
-Requiere `harbor` y una API key real en `EAI_API_KEY`.
+Requiere `harbor`, Docker y una API key real en `EAI_API_KEY`.
+
+Precondiciones (evita “infra failures”):
+
+- Ejecuta Harbor **sin** `sudo` (evita artifacts root-owned y sesiones Docker inconsistentes):
+  - `sg docker -c 'harbor jobs start -c tbench2_first5.harbor.yaml'`
+  - o usa `./harbor_run.sh tbench2_first5.harbor.yaml`
+- Fedora (SELinux): si ves fallos de escritura de logs/verifier por bind mounts, etiqueta `jobs/`:
+  - `sudo chcon -Rt svirt_sandbox_file_t "$(pwd)/jobs"`
+- Si reintentas un job y hubo timeouts/conflicts, limpia el estado Docker del job:
+  - `./harbor_pre_run_cleanup.sh --job tbench2-all-glm47-coding-v19`
+
+Rerun rápido (solo los 11 fallos de v19):
+
+```bash
+./harbor_prepull_images.sh --v19-failures --download-terminal-bench --registry-url https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json
+./harbor_preflight.sh --require-kvm
+./harbor_run.sh tbench2_all_glm47_coding_v19_failures.harbor.yaml
+```
 
 ```bash
 export EAI_API_KEY="tu-api-key-aqui"
-go build -o eai ./cmd/eai
-harbor jobs start -c tbench2_first5.harbor.yaml
+go build -o bin/eai ./cmd/eai/
+./harbor_run.sh tbench2_first5.harbor.yaml
 ```
 
 ## 📊 Terminal-Bench 2.0 Results

@@ -38,10 +38,10 @@ func (m *MainModel) renderPlanDecision() string {
 		return ""
 	}
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD")).Bold(true)
-	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMuted))
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent2)).Bold(true)
+	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorFg))
 
 	selected := m.planDecisionChoice
 	if selected != planDecisionNo {
@@ -69,7 +69,7 @@ func (m *MainModel) renderPlanDecision() string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#44475A")).
+		BorderForeground(lipgloss.Color(colorBorder)).
 		Padding(0, 1).
 		Width(m.chatAreaWidth() - 2).
 		Render(b.String())
@@ -271,9 +271,9 @@ func renderPlanContent(content string, width int) string {
 		return ""
 	}
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFB86C"))
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8F8F2"))
-	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8BE9FD"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(colorAccent))
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorFg))
+	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorAccent2))
 
 	out := make([]string, 0, len(lines))
 	for idx, line := range lines {

@@ -83,9 +83,9 @@ func DefaultConfig() Config {
 	return Config{
 		BaseURL:           DefaultBaseURL,
 		Model:             DefaultModel,
-		MaxTokens:         4096,
+		MaxTokens:         32768,
 		MaxParallelAgents: 50,
-		DefaultMode:       "plan",
+		DefaultMode:       "do",
 		SafeMode:          true,
 		Installed:         false,
 
@@ -133,7 +133,7 @@ func LoadConfig(path string) (Config, error) {
 	cfg.BaseURL = NormalizeBaseURL(cfg.BaseURL)
 	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 2048
+		cfg.MaxTokens = 32768
 	}
 	if cfg.MaxParallelAgents <= 0 {
 		cfg.MaxParallelAgents = 50
@@ -142,7 +142,7 @@ func LoadConfig(path string) (Config, error) {
 		cfg.MaxParallelAgents = 900
 	}
 	if cfg.DefaultMode == "" {
-		cfg.DefaultMode = "plan"
+		cfg.DefaultMode = "do"
 	}
 	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	return cfg, nil

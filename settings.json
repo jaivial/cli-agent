@@ -1,8 +1,13 @@
-api_key: ''
-base_url: https://api.z.ai/api/paas/v4/chat/completions
+eai_api_key: b0f5648699f54af9bd43b7497152618d.PFU6a5WHDou4YyeX
+base_url: https://api.z.ai/api/coding/paas/v4
 model: glm-4.7
 max_tokens: 4096
 max_parallel_agents: 50
 mode: plan
 safe_mode: true
 installed: true
+chat_verbosity: compact
+show_banner: false
+enable_mouse: true
+alt_screen: true
+permissions: full-access

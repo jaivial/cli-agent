@@ -227,3 +227,37 @@ func TestExecuteChat_PlanModeStreamsProgressEvents(t *testing.T) {
 		t.Fatalf("expected tool progress events in plan mode")
 	}
 }
+
+func TestRenderAgentStateForChat_PreservesNonGenericFinalOutputWhenCompleted(t *testing.T) {
+	state := &AgentState{
+		FinalOutput: "hello there\nTASK_COMPLETED",
+		Completed:   true,
+	}
+
+	out := renderAgentStateForChat(state)
+	if !strings.Contains(out, "hello there") {
+		t.Fatalf("expected final output to be preserved, got: %q", out)
+	}
+	if strings.TrimSpace(out) == "Done. The task completed successfully." {
+		t.Fatalf("expected non-generic output, got: %q", out)
+	}
+}
+
+func TestBuildAgentMemoryPrelude_DropsTrailingUserEcho(t *testing.T) {
+	history := []StoredMessage{
+		{Role: "user", Content: "first user msg"},
+		{Role: "assistant", Content: "first assistant msg"},
+		{Role: "user", Content: "current task"},
+	}
+	history = dropTrailingUserEcho(history, "current task")
+	prelude := buildAgentMemoryPrelude("", history)
+	if !strings.Contains(prelude, "USER: first user msg") {
+		t.Fatalf("expected prelude to include first user message, got: %q", prelude)
+	}
+	if !strings.Contains(prelude, "EAI: first assistant msg") {
+		t.Fatalf("expected prelude to include assistant message, got: %q", prelude)
+	}
+	if strings.Contains(prelude, "current task") {
+		t.Fatalf("expected prelude to exclude current task, got: %q", prelude)
+	}
+}

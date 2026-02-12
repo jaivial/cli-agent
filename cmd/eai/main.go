@@ -250,7 +250,7 @@ func main() {
 		},
 	}
 
-	root.Flags().String("mode", "plan", "mode: plan|create (TUI), plus ask|architect|do|code|debug|orchestrate")
+	root.Flags().String("mode", "do", "mode: do (TUI), plus ask|architect|plan|do|code|debug|orchestrate for --no-tui")
 	root.Flags().BoolP("no-tui", "n", false, "Use simple REPL instead of TUI")
 	root.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.Flags().BoolP("version", "v", false, "Print version information")

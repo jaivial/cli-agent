@@ -174,6 +174,58 @@ func sessionHistoryForPrompt(history []StoredMessage, max int) []StoredMessage {
 	return filtered
 }
 
+func dropTrailingUserEcho(history []StoredMessage, latestInput string) []StoredMessage {
+	if len(history) == 0 {
+		return nil
+	}
+	last := history[len(history)-1]
+	if strings.EqualFold(strings.TrimSpace(last.Role), "user") &&
+		strings.TrimSpace(last.Content) == strings.TrimSpace(latestInput) {
+		return history[:len(history)-1]
+	}
+	return history
+}
+
+func buildAgentMemoryPrelude(summary string, history []StoredMessage) string {
+	summary = strings.TrimSpace(summary)
+	history = sessionHistoryForPrompt(history, 12)
+	if summary == "" && len(history) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("Conversation context (most recent turns). Use for continuity only.\n\n")
+
+	if summary != "" {
+		b.WriteString("Session summary:\n")
+		b.WriteString(truncateEllipsis(summary, 2500))
+		b.WriteString("\n\n")
+	}
+
+	if len(history) > 0 {
+		b.WriteString("Most recent messages:\n")
+		for _, m := range history {
+			role := strings.ToUpper(strings.TrimSpace(m.Role))
+			if strings.EqualFold(role, "ASSISTANT") {
+				role = "EAI"
+			}
+			txt := strings.TrimSpace(m.Content)
+			if txt == "" || role == "" {
+				continue
+			}
+			txt = strings.ReplaceAll(txt, "\n", " ")
+			txt = strings.Join(strings.Fields(txt), " ")
+			txt = truncateEllipsis(txt, 400)
+			b.WriteString(role)
+			b.WriteString(": ")
+			b.WriteString(txt)
+			b.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(b.String())
+}
+
 func buildSessionChatPrompt(systemPrompt, summary string, history []StoredMessage, input string, maxHistory int) string {
 	var b strings.Builder
 	b.WriteString("[SYSTEM]\n")
@@ -543,6 +595,44 @@ func looksLikeListFilesRequest(input string) bool {
 	return false
 }
 
+func looksLikeTrivialChatTurn(input string) bool {
+	s := strings.ToLower(strings.TrimSpace(input))
+	if s == "" {
+		return true
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	// Keep this intentionally narrow so we don't misclassify short real tasks.
+	if len(s) > 48 {
+		return false
+	}
+	s = strings.Trim(s, " \t\r\n.!?…")
+	s = strings.Join(strings.Fields(s), " ")
+	switch s {
+	case "hi", "hi there",
+		"hello", "hello there",
+		"hey", "hey there",
+		"yo", "sup",
+		"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches",
+		"good morning", "good afternoon", "good evening",
+		"thanks", "thank you", "thx", "ty",
+		"ok", "okay", "cool", "nice",
+		"ping", "test":
+		return true
+	default:
+		return false
+	}
+}
+
+func trivialChatResponseForMode(mode Mode) string {
+	switch mode {
+	case ModePlan:
+		return "hi. tell me what you want to plan."
+	default:
+		return "hi. tell me what you want me to do."
+	}
+}
+
 func isGenericCompletionText(s string) bool {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
@@ -654,7 +744,7 @@ func renderAgentStateForChat(state *AgentState) string {
 	for i := len(state.Results) - 1; i >= 0; i-- {
 		out := strings.TrimSpace(state.Results[i].Output)
 		if out != "" {
-			out = trimForDisplay(out, 8000)
+			out = trimForDisplay(out, 32768)
 			return "Done. Here is the latest output:\n\n```text\n" + out + "\n```"
 		}
 	}
@@ -670,7 +760,7 @@ func renderAgentStateForChat(state *AgentState) string {
 		if strings.Contains(lower, "did not return any tool calls") {
 			return "I couldn't complete this request because the model stopped returning actionable tool steps. I can retry with a stricter execution prompt."
 		}
-		if isGenericCompletionText(final) || state.Completed {
+		if isGenericCompletionText(final) {
 			return "Done. The task completed successfully."
 		}
 		return "Done. " + final
@@ -706,6 +796,11 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 		if out, ok, err := tryLocalReactScaffold(input); ok {
 			return out, err
 		}
+	}
+
+	// Avoid spinning up the plan/tool agents for trivial greetings/smalltalk.
+	if (mode == ModePlan || IsToolMode(mode)) && looksLikeTrivialChatTurn(input) {
+		return trivialChatResponseForMode(mode), nil
 	}
 
 	// Plan mode: use a read-only discovery agent that always returns a plan.
@@ -787,6 +882,75 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 	return out, nil
 }
 
+// ExecuteAgentTaskWithProgressEvents runs the same tool-driven agent loop as `eai agent`,
+// but returns a chat-friendly final text. This is used by the TUI "chat" so we can keep
+// the agent's prompt/behavior identical to Terminal-Bench runs while streaming progress.
+func (a *Application) ExecuteAgentTaskWithProgressEvents(ctx context.Context, task string, progress func(ProgressEvent)) (string, error) {
+	return a.ExecuteAgentTaskInSessionWithProgressEvents(ctx, "", "", task, progress)
+}
+
+// ExecuteAgentTaskInSessionWithProgressEvents runs the tool agent with lightweight
+// session memory (recent turns + optional summary) injected ahead of the current task.
+// This is only used by the interactive TUI and does not affect `eai agent`.
+func (a *Application) ExecuteAgentTaskInSessionWithProgressEvents(ctx context.Context, sessionID string, workDir string, task string, progress func(ProgressEvent)) (string, error) {
+	if a == nil {
+		return "", fmt.Errorf("application is nil")
+	}
+
+	// Avoid confusing agent-loop failures when API key is missing.
+	if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
+		return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+	}
+
+	// Lightweight memory injection (recent turns + optional summary).
+	var (
+		history        []StoredMessage
+		sessionSummary string
+	)
+	if a.Memory != nil && strings.TrimSpace(sessionID) != "" {
+		if msgs, err := a.Memory.LoadMessages(sessionID); err == nil {
+			history = msgs
+		}
+		if sess, _, err := a.Memory.LoadSessionForWorkDir(workDir, sessionID); err == nil && sess != nil {
+			sessionSummary = strings.TrimSpace(sess.ContextSummary)
+		}
+	}
+	history = dropTrailingUserEcho(history, task)
+	prelude := buildAgentMemoryPrelude(sessionSummary, history)
+
+	stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
+	agent := NewAgentLoop(a.Client, 30, stateDir, a.Logger)
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		agent.WorkDir = wd
+	}
+	if progress != nil {
+		agent.Progress = progress
+	}
+	if strings.TrimSpace(prelude) != "" {
+		agent.PreludeMessages = []AgentMessage{{
+			Role:      "user",
+			Content:   prelude,
+			Timestamp: time.Now(),
+		}}
+	}
+
+	state, err := agent.Execute(ctx, task)
+	if err != nil {
+		return "", err
+	}
+
+	// Prefer showing the model's final output verbatim (without the sentinel),
+	// like `eai agent` does.
+	final := stripTaskCompletedSentinel(state.FinalOutput)
+	final = strings.TrimSpace(final)
+	if final != "" {
+		return final, nil
+	}
+
+	// Fall back to a friendly summary when the final output is empty/generic.
+	return renderAgentStateForChat(state), nil
+}
+
 func (a *Application) ExecuteChatInSession(ctx context.Context, sessionID string, mode Mode, input string) (string, error) {
 	return a.ExecuteChatInSessionWithProgress(ctx, sessionID, mode, input, nil)
 }
@@ -810,6 +974,8 @@ func (a *Application) ExecuteChatInSessionWithProgressEvents(
 	input string,
 	progress func(ProgressEvent),
 ) (string, error) {
+	origInput := input
+
 	// Local fastpath: scaffold a React site in create mode without requiring an API key.
 	if mode == ModeCreate {
 		if out, ok, err := tryLocalReactScaffold(input); ok {
@@ -835,39 +1001,50 @@ func (a *Application) ExecuteChatInSessionWithProgressEvents(
 	}
 
 	// Plan mode now runs a read-only tool agent. Inject lightweight context similarly to tool modes.
-	if strings.TrimSpace(sessionID) != "" && (len(history) > 0 || strings.TrimSpace(sessionSummary) != "") && (IsToolMode(mode) || mode == ModePlan) && !looksLikeListFilesRequest(input) {
+	toolSessionContext := strings.TrimSpace(os.Getenv("EAI_TOOL_SESSION_CONTEXT")) == "1"
+	if toolSessionContext &&
+		strings.TrimSpace(sessionID) != "" &&
+		(len(history) > 0 || strings.TrimSpace(sessionSummary) != "") &&
+		(IsToolMode(mode) || mode == ModePlan) &&
+		!looksLikeListFilesRequest(origInput) &&
+		!looksLikeTrivialChatTurn(origInput) {
 		max := 8
 		if len(history) > max {
 			history = history[len(history)-max:]
 		}
 		var b strings.Builder
+		b.WriteString("Current request:\n")
+		b.WriteString(origInput)
+		b.WriteString("\n\n")
+
 		if strings.TrimSpace(sessionSummary) != "" {
 			b.WriteString("Session summary:\n")
 			b.WriteString(truncateEllipsis(sessionSummary, 2500))
 			b.WriteString("\n\n")
 		}
-		b.WriteString("Conversation context (most recent messages):\n")
-		for _, m := range history {
-			role := strings.ToUpper(strings.TrimSpace(m.Role))
-			if role == "" {
-				continue
+
+		if len(history) > 0 {
+			b.WriteString("Conversation context (most recent messages):\n")
+			for _, m := range history {
+				role := strings.ToUpper(strings.TrimSpace(m.Role))
+				if role == "" {
+					continue
+				}
+				txt := strings.TrimSpace(m.Content)
+				if txt == "" {
+					continue
+				}
+				txt = strings.ReplaceAll(txt, "\n", " ")
+				txt = strings.Join(strings.Fields(txt), " ")
+				if len(txt) > 300 {
+					txt = txt[:300] + "..."
+				}
+				b.WriteString(role)
+				b.WriteString(": ")
+				b.WriteString(txt)
+				b.WriteString("\n")
 			}
-			txt := strings.TrimSpace(m.Content)
-			if txt == "" {
-				continue
-			}
-			txt = strings.ReplaceAll(txt, "\n", " ")
-			txt = strings.Join(strings.Fields(txt), " ")
-			if len(txt) > 300 {
-				txt = txt[:300] + "..."
-			}
-			b.WriteString(role)
-			b.WriteString(": ")
-			b.WriteString(txt)
-			b.WriteString("\n")
 		}
-		b.WriteString("\nCurrent request:\n")
-		b.WriteString(input)
 		input = b.String()
 	}
 

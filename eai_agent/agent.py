@@ -35,6 +35,17 @@ def load_int_env(name: str) -> int | None:
         return None
 
 
+def load_bool_env(name: str) -> bool | None:
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return None
+    if v in {"1", "true", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
 def resolve_eai_binary_path() -> Path:
     """Resolve the local eai binary path to upload into the environment."""
 
@@ -45,6 +56,9 @@ def resolve_eai_binary_path() -> Path:
         candidates.append(Path(env_path))
 
     cwd = Path.cwd()
+    # Prefer a Harbor-specific build artifact if present (built with CGO disabled
+    # for maximum glibc compatibility across older images).
+    candidates.append(cwd / "bin" / "eai_harbor")
     candidates.append(cwd / "eai")
     candidates.append(cwd / "bin" / "eai")
 
@@ -95,42 +109,6 @@ class EaiAgent(BaseAgent):
     async def setup(self, environment: BaseEnvironment) -> None:
         """Upload the eai binary to the environment."""
 
-        # Some images have apt "Release file ... is not valid yet" issues due to clock skew.
-        # Disable apt's date checks so verifier scripts that run apt-get succeed.
-        try:
-            await environment.exec(
-                "if [ -d /etc/apt/apt.conf.d ]; then "
-                "cat > /etc/apt/apt.conf.d/99eai-ignore-release-date << 'EOF'\n"
-                "Acquire::Check-Date \"false\";\n"
-                "Acquire::Check-Valid-Until \"false\";\n"
-                "Acquire::Max-FutureTime \"86400\";\n"
-                "EOF\n"
-                "fi"
-            )
-        except Exception:
-            pass
-
-        # Some tasks' verifiers import OpenCV (cv2). The opencv-python wheel requires
-        # libGL at runtime (libGL.so.1). Install it best-effort when apt is available.
-        # This is cheap (~a few MB) and avoids verifier import failures (e.g. sam-cell-seg).
-        try:
-            await environment.exec(
-                "if command -v apt-get >/dev/null 2>&1; then "
-                "apt-get update -qq || true; "
-                "apt-get install -y -qq libgl1 libglib2.0-0 2>/dev/null || true; "
-                "fi"
-            )
-        except Exception:
-            pass
-
-        # Install CA certificates for HTTPS requests (ignore errors if already installed)
-        try:
-            await environment.exec(
-                "apt-get update -qq && apt-get install -y -qq ca-certificates 2>/dev/null || true"
-            )
-        except Exception:
-            pass
-
         if not self.eai_binary_path.exists():
             raise FileNotFoundError(
                 f"eai binary not found at {self.eai_binary_path}. "
@@ -145,6 +123,18 @@ class EaiAgent(BaseAgent):
 
         # Make it executable
         await environment.exec("chmod +x /usr/local/bin/eai")
+
+        # Fail fast if the binary cannot start in this image (common failure mode:
+        # glibc version mismatch when built with CGO enabled on the host).
+        probe = await environment.exec("/usr/local/bin/eai --help", timeout_sec=15)
+        if probe.return_code != 0 and (
+            (probe.stdout and "GLIBC_" in probe.stdout)
+            or (probe.stderr and "GLIBC_" in probe.stderr)
+        ):
+            raise RuntimeError(
+                "Uploaded eai binary failed to execute in the container (glibc mismatch). "
+                "Build a Harbor-compatible binary (see harbor_build_eai.sh)."
+            )
 
         # Some terminal-bench tasks use `uv` and assume a project root exists.
         # Create a minimal pyproject.toml only if one isn't already present.
@@ -216,8 +206,13 @@ dependencies = []
         env = {
             "EAI_API_KEY": self.api_key,
             "EAI_SKIP_TLS_VERIFY": "1",
-            "EAI_TBENCH_FASTPATH": "1",
         }
+        # Fastpath is for local debugging; do not enable by default because it can
+        # short-circuit real task solving and can trigger apt/dpkg lock contention
+        # if a timeboxed command gets cancelled.
+        fastpath = load_bool_env("EAI_TBENCH_FASTPATH")
+        if fastpath:
+            env["EAI_TBENCH_FASTPATH"] = "1"
         if self.base_url:
             env["EAI_BASE_URL"] = self.base_url
         if self.model:

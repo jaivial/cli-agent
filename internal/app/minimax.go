@@ -79,7 +79,7 @@ func NewMinimaxClient(apiKey, model, baseURL string, maxTokens int) *MinimaxClie
 		baseURL = NormalizeBaseURL(baseURL)
 	}
 	if maxTokens <= 0 {
-		maxTokens = 4096
+		maxTokens = 32768
 	}
 
 	// Create HTTP client with optional TLS skip for container environments.

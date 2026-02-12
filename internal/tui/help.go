@@ -32,22 +32,18 @@ func (m helpModel) View() string {
 
 	b.WriteString(helpSectionStyle.Render("commands"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  %s  send message\n", helpKeyStyle.Render("enter")))
+	b.WriteString(fmt.Sprintf("  %s  send message (queues while running)\n", helpKeyStyle.Render("enter")))
+	b.WriteString(fmt.Sprintf("  %s  cancel running task\n", helpKeyStyle.Render("esc")))
 	b.WriteString(fmt.Sprintf("  %s  browse sent messages\n", helpKeyStyle.Render("up/down")))
-	b.WriteString(fmt.Sprintf("  %s  switch mode\n", helpKeyStyle.Render("shift+tab")))
 	b.WriteString(fmt.Sprintf("  %s  clear chat\n", helpKeyStyle.Render("x")))
 	b.WriteString(fmt.Sprintf("  %s  quit\n", helpKeyStyle.Render("shift+q")))
 
 	b.WriteString("\n")
 
-	b.WriteString(helpSectionStyle.Render("modes"))
+	b.WriteString(helpSectionStyle.Render("execution"))
 	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("  plan - planning and analysis"))
-	b.WriteString("\n")
-	b.WriteString(helpDescriptionStyle.Render("  create - create files / execute actions"))
-	b.WriteString("\n")
-
-	b.WriteString("\n")
+	b.WriteString(helpDescriptionStyle.Render("  each message runs the same tool-driven agent as `eai agent \"...\"`"))
+	b.WriteString("\n\n")
 
 	b.WriteString(helpSectionStyle.Render("setup"))
 	b.WriteString("\n")
@@ -61,7 +57,7 @@ func (m helpModel) View() string {
 	b.WriteString("\n")
 
 	b.WriteString("\n")
-	b.WriteString(helpFooterStyle.Render("shift+q quit | shift+tab mode | enter send"))
+	b.WriteString(helpFooterStyle.Render("shift+q quit | esc cancel | enter send"))
 
 	return b.String()
 }
@@ -70,7 +66,6 @@ type keyMap struct {
 	Quit            key.Binding
 	Enter           key.Binding
 	Clear           key.Binding
-	NextMode        key.Binding
 	Expand          key.Binding
 	ToggleBanner    key.Binding
 	ToggleVerbosity key.Binding
@@ -90,10 +85,6 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("x", "ctrl+l"),
 			key.WithHelp("x/ctrl+l", "clear chat"),
 		),
-		NextMode: key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("shift+tab", "switch mode"),
-		),
 		Expand: key.NewBinding(
 			key.WithKeys("alt+e"),
 			key.WithHelp("alt+e", "expand last long reply"),
@@ -110,12 +101,12 @@ func defaultKeyMap() keyMap {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Clear, k.NextMode, k.Expand, k.ToggleBanner, k.ToggleVerbosity, k.Quit}
+	return []key.Binding{k.Enter, k.Clear, k.Expand, k.ToggleBanner, k.ToggleVerbosity, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Enter, k.Clear, k.NextMode, k.Quit},
+		{k.Enter, k.Clear, k.Quit},
 	}
 }
 
@@ -123,19 +114,19 @@ func (k keyMap) FullHelp() [][]key.Binding {
 var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFB86C"))
+			Foreground(lipgloss.Color(colorAccent))
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#BD93F9"))
+				Foreground(lipgloss.Color(colorAccent2))
 
 	helpKeyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF79C6"))
+			Foreground(lipgloss.Color(colorAccent))
 
 	helpDescriptionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6272A4"))
+				Foreground(lipgloss.Color(colorMuted))
 
 	helpFooterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#44475A")).
+			Foreground(lipgloss.Color(colorSubtle)).
 			Italic(true)
 )
