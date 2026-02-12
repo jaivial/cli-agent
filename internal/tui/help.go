@@ -35,7 +35,7 @@ func (m helpModel) View() string {
 	b.WriteString(fmt.Sprintf("  %s  send message (queues while running)\n", helpKeyStyle.Render("enter")))
 	b.WriteString(fmt.Sprintf("  %s  cancel running task\n", helpKeyStyle.Render("esc")))
 	b.WriteString(fmt.Sprintf("  %s  browse sent messages\n", helpKeyStyle.Render("up/down")))
-	b.WriteString(fmt.Sprintf("  %s  clear chat\n", helpKeyStyle.Render("x")))
+	b.WriteString(fmt.Sprintf("  %s  new chat (clear)\n", helpKeyStyle.Render("/new or /clear")))
 	b.WriteString(fmt.Sprintf("  %s  quit\n", helpKeyStyle.Render("shift+q")))
 
 	b.WriteString("\n")
@@ -82,8 +82,8 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("enter", "send message"),
 		),
 		Clear: key.NewBinding(
-			key.WithKeys("x", "ctrl+l"),
-			key.WithHelp("x/ctrl+l", "clear chat"),
+			key.WithKeys("ctrl+l"),
+			key.WithHelp("ctrl+l", "clear chat"),
 		),
 		Expand: key.NewBinding(
 			key.WithKeys("alt+e"),

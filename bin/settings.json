@@ -10,4 +10,4 @@ chat_verbosity: compact
 show_banner: false
 enable_mouse: true
 alt_screen: true
-permissions: full-access
+permissions: dangerously-full-access

@@ -141,6 +141,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if err := app.SaveConfig(*s.cfg, app.DefaultConfigPath()); err != nil {
+					appendTUIErrorLog("connect save", "", err.Error())
 					s.statusMsg = "failed to save: " + err.Error()
 					return s, nil
 				}

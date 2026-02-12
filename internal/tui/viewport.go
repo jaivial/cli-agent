@@ -107,6 +107,9 @@ type MainModel struct {
 	permissionsPickerActive bool
 	permissionsPickerIndex  int
 	permissionsOptions      []string
+
+	transientErrorText  string
+	transientErrorToken int
 }
 
 type Message struct {
@@ -149,6 +152,10 @@ type titleMsg struct {
 
 type resumeTickMsg struct{}
 
+type clearTransientErrorMsg struct {
+	token int
+}
+
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 var modes = []app.Mode{app.ModeDo}
 
@@ -177,7 +184,7 @@ func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
 	mode = app.ModeDo
 
 	ta := textarea.New()
-	ta.Placeholder = "message... (/ commands, esc cancel, enter send)"
+	ta.Placeholder = "message... (/ for commands, /new new chat, esc cancel, enter send)"
 	ta.Focus()
 	ta.CharLimit = 8000
 	ta.SetWidth(60)
@@ -304,6 +311,118 @@ func (m *MainModel) persistSessionMessage(role, content string) {
 	_ = m.app.AppendSessionMessage(m.session.ID, role, content, m.mode, m.sessionWorkDir())
 }
 
+func (m *MainModel) showTransientError(text string) tea.Cmd {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	// Keep it one line so it always fits the reserved error line below the input.
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return nil
+	}
+
+	m.transientErrorText = text
+	m.transientErrorToken++
+	token := m.transientErrorToken
+	return tea.Tick(3*time.Second, func(_ time.Time) tea.Msg {
+		return clearTransientErrorMsg{token: token}
+	})
+}
+
+func (m *MainModel) logAndShowError(context string, err error) tea.Cmd {
+	if err == nil {
+		return nil
+	}
+	sid := ""
+	if m.session != nil {
+		sid = m.session.ID
+	}
+	appendTUIErrorLog(context, sid, err.Error())
+	if strings.TrimSpace(context) != "" {
+		return m.showTransientError(fmt.Sprintf("%s: %v", strings.TrimSpace(context), err))
+	}
+	return m.showTransientError(err.Error())
+}
+
+func (m *MainModel) logAndShowErrorText(context, message string) tea.Cmd {
+	sid := ""
+	if m.session != nil {
+		sid = m.session.ID
+	}
+	appendTUIErrorLog(context, sid, message)
+	if strings.TrimSpace(context) != "" {
+		message = strings.TrimSpace(context) + ": " + strings.TrimSpace(message)
+	}
+	return m.showTransientError(message)
+}
+
+func (m *MainModel) startNewChat() tea.Cmd {
+	if m.loading {
+		return m.showTransientError("command unavailable while agent is running. press esc to cancel first.")
+	}
+
+	var newSess *app.Session
+	if m.app != nil {
+		sess, err := m.app.CreateSession("")
+		if err != nil {
+			return m.logAndShowError("failed to create new session", err)
+		}
+		newSess = sess
+	}
+
+	// Defensive cleanup of any lingering turn state.
+	if m.activeCancel != nil {
+		m.activeCancel()
+		m.activeCancel = nil
+	}
+	m.progressCh = nil
+	m.cancelQueued = false
+	m.queuedRequests = nil
+	m.turnResponseDone = false
+	m.turnProgressDone = false
+
+	m.session = newSess
+
+	m.title = "New Chat"
+	if newSess != nil && strings.TrimSpace(newSess.Title) != "" {
+		m.title = strings.TrimSpace(newSess.Title)
+	}
+
+	m.messages = nil
+	m.expandedMessageIDs = make(map[string]bool)
+	m.planDecisionActive = false
+	m.planDecisionChoice = planDecisionYes
+	m.pendingPlanText = ""
+	m.pendingPlanContext = ""
+	m.traceMsgIndex = -1
+	m.turnProgress = nil
+	m.turnEvents = nil
+	m.turnProgressFrom = time.Time{}
+	m.loading = false
+	m.loadingText = "thinking..."
+	m.loadingSince = time.Time{}
+	m.loadingEnded = time.Time{}
+	m.transientErrorText = ""
+	m.resetInput()
+
+	m.messages = append(m.messages, Message{
+		ID:        fmt.Sprintf("system-%d", time.Now().UnixNano()),
+		Role:      "system",
+		Content:   "new chat started.",
+		Timestamp: time.Now(),
+	})
+
+	m.applyLayout()
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	m.stickToBottom = true
+	m.unseenCount = 0
+	return nil
+}
+
 func (m *MainModel) maybeStartNextQueued() tea.Cmd {
 	if m.loading || !m.turnResponseDone || !m.turnProgressDone || m.planDecisionActive {
 		return nil
@@ -334,15 +453,7 @@ func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 
 	// Start a fresh persisted session on first user message (no auto-resume).
 	if err := m.ensureSession(); err != nil {
-		m.messages = append(m.messages, Message{
-			ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-			Role:      "error",
-			Content:   fmt.Sprintf("session error: %v", err),
-			Timestamp: time.Now(),
-		})
-		m.updateViewport()
-		m.viewport.GotoBottom()
-		return nil
+		return m.logAndShowError("session error", err)
 	}
 
 	userMsg := Message{
@@ -461,6 +572,7 @@ func (m *MainModel) openResumePicker() {
 	}
 	items, err := m.app.ListRecentSessions("", resumeListMax)
 	if err != nil {
+		appendTUIErrorLog("resume list", "", err.Error())
 		m.resumeLoadErr = err.Error()
 		return
 	}
@@ -507,28 +619,22 @@ func (m *MainModel) closeModelPicker() {
 	m.input.Focus()
 }
 
-func (m *MainModel) selectModelAt(index int) string {
+func (m *MainModel) selectModelAt(index int) (string, tea.Cmd) {
 	if index < 0 || index >= len(m.modelOptions) {
-		return ""
+		return "", nil
 	}
 	model := app.NormalizeModel(m.modelOptions[index])
 	if m.app == nil {
-		return model
+		return model, nil
 	}
 	cfg := m.app.Config
 	cfg.Model = model
 	cfg.BaseURL = app.NormalizeBaseURL(cfg.BaseURL)
 	if err := app.SaveConfig(cfg, app.DefaultConfigPath()); err != nil {
-		m.messages = append(m.messages, Message{
-			ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-			Role:      "error",
-			Content:   fmt.Sprintf("failed to save model: %v", err),
-			Timestamp: time.Now(),
-		})
-		return ""
+		return "", m.logAndShowError("failed to save model", err)
 	}
 	m.app.ReloadClient(cfg)
-	return model
+	return model, nil
 }
 
 func (m *MainModel) resumeSelectedSession() error {
@@ -566,8 +672,9 @@ func (m *MainModel) statusBarHeight() int {
 }
 
 func (m *MainModel) inputAreaHeight() int {
-	// Activity line + bordered textarea (top and bottom border + content lines).
-	height := 1 + 2 + m.input.Height()
+	// Activity line + bordered textarea (top and bottom border + content lines) +
+	// a reserved one-line error message below the input box.
+	height := 1 + 2 + m.input.Height() + 1
 	if m.modelPickerActive {
 		if pickerHeight := lipgloss.Height(m.renderModelPicker()); pickerHeight > 0 {
 			height += pickerHeight + 1
@@ -910,6 +1017,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				if err := m.resumeSelectedSession(); err != nil {
+					appendTUIErrorLog("resume select", "", err.Error())
 					m.resumeLoadErr = err.Error()
 					return m, m.resumeTick()
 				}
@@ -954,7 +1062,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case tea.KeyEnter:
 				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
-				selected := m.selectModelAt(m.modelPickerIndex)
+				selected, saveCmd := m.selectModelAt(m.modelPickerIndex)
 				m.closeModelPicker()
 				if selected != "" {
 					m.messages = append(m.messages, Message{
@@ -969,7 +1077,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if wasAtBottom {
 					m.viewport.GotoBottom()
 				}
-				return m, nil
+				return m, saveCmd
 			default:
 				return m, nil
 			}
@@ -1009,7 +1117,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case tea.KeyEnter:
 				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
-				selected := m.selectPermissionsAt(m.permissionsPickerIndex)
+				selected, saveCmd := m.selectPermissionsAt(m.permissionsPickerIndex)
 				m.closePermissionsPicker()
 				if selected != "" {
 					m.messages = append(m.messages, Message{
@@ -1024,7 +1132,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if wasAtBottom {
 					m.viewport.GotoBottom()
 				}
-				return m, nil
+				return m, saveCmd
 			default:
 				return m, nil
 			}
@@ -1163,7 +1271,16 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if strings.EqualFold(strings.TrimSpace(input), "/new") || strings.EqualFold(strings.TrimSpace(input), "/clear") {
+				m.resetInput()
+				return m, m.startNewChat()
+			}
+
 			if handled, content, role := m.handlePermissionsCommand(input); handled {
+				if strings.EqualFold(role, "error") {
+					m.resetInput()
+					return m, m.logAndShowErrorText("permissions", content)
+				}
 				m.messages = append(m.messages, Message{
 					ID:        fmt.Sprintf("%s-%d", role, time.Now().UnixNano()),
 					Role:      role,
@@ -1196,12 +1313,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				wizard := NewSetupWizard(&cfg)
 				p := tea.NewProgram(wizard)
 				if _, err := p.Run(); err != nil {
-					m.messages = append(m.messages, Message{
-						ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-						Role:      "error",
-						Content:   fmt.Sprintf("connection error: %v", err),
-						Timestamp: time.Now(),
-					})
+					errCmd := m.logAndShowError("connection error", err)
+					m.resetInput()
+					return m, errCmd
 				} else if wizard.Saved() {
 					// Reload the client with new config - no restart needed
 					newCfg := wizard.GetConfig()
@@ -1252,15 +1366,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.applySession(sess, msgs)
 						return m, nil
 					}
-					m.messages = append(m.messages, Message{
-						ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-						Role:      "error",
-						Content:   fmt.Sprintf("resume failed: session %q not found in this folder", sid),
-						Timestamp: time.Now(),
-					})
-					m.updateViewport()
-					m.viewport.GotoBottom()
-					return m, nil
+					return m, m.logAndShowErrorText("resume", fmt.Sprintf("session %q not found in this folder", sid))
 				}
 				m.openResumePicker()
 				return m, m.resumeTick()
@@ -1302,29 +1408,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.submitUserRequest(input, input)
 
 		case key.Matches(msg, m.help.keys.Clear):
-			m.messages = []Message{}
-			m.planDecisionActive = false
-			m.planDecisionChoice = planDecisionYes
-			m.pendingPlanText = ""
-			m.traceMsgIndex = -1
-			if m.session != nil && m.app.Memory != nil {
-				_ = m.app.Memory.ClearSessionMessages(m.session.ID)
-				m.session.Title = ""
-				_ = m.app.Memory.SaveSession(m.session)
-				m.title = "New Chat"
-			}
-			m.messages = append(m.messages, Message{
-				ID:        "welcome-1",
-				Role:      "system",
-				Content:   "chat cleared.",
-				Timestamp: time.Now(),
-			})
-			m.applyLayout()
-			m.updateViewport()
-			m.viewport.GotoBottom()
-			m.stickToBottom = true
-			m.unseenCount = 0
-			return m, nil
+			return m, m.startNewChat()
 
 		case msg.Type == tea.KeyPgUp:
 			m.viewport.ViewUp()
@@ -1341,7 +1425,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showBanner = !m.showBanner
 			if m.app != nil {
 				m.app.Config.ShowBanner = m.showBanner
-				_ = app.SaveConfig(m.app.Config, app.DefaultConfigPath())
+				if err := app.SaveConfig(m.app.Config, app.DefaultConfigPath()); err != nil {
+					appendTUIErrorLog("save config", "", err.Error())
+				}
 			}
 			m.applyLayout()
 			m.updateViewport()
@@ -1363,7 +1449,9 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.app != nil {
 				m.app.Config.ChatVerbosity = m.verbosity
-				_ = app.SaveConfig(m.app.Config, app.DefaultConfigPath())
+				if err := app.SaveConfig(m.app.Config, app.DefaultConfigPath()); err != nil {
+					appendTUIErrorLog("save config", "", err.Error())
+				}
 			}
 			return m, nil
 
@@ -1381,6 +1469,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiResponseMsg:
 		wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
 		canceled := m.cancelQueued
+		var errCmd tea.Cmd
 		m.loading = false
 		m.loadingEnded = time.Now()
 		m.turnResponseDone = true
@@ -1406,12 +1495,12 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Timestamp: time.Now(),
 				})
 			} else {
-				m.messages = append(m.messages, Message{
-					ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-					Role:      "error",
-					Content:   fmt.Sprintf("error: %v", msg.err),
-					Timestamp: time.Now(),
-				})
+				sid := ""
+				if m.session != nil {
+					sid = m.session.ID
+				}
+				appendTUIErrorLog("agent", sid, msg.err.Error())
+				errCmd = m.showTransientError(msg.err.Error())
 			}
 		} else {
 			assistantContent := msg.response
@@ -1436,10 +1525,10 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.unseenCount++
 		}
-		if cmd := m.maybeStartNextQueued(); cmd != nil {
-			return m, cmd
+		if nextCmd := m.maybeStartNextQueued(); nextCmd != nil {
+			return m, tea.Batch(errCmd, nextCmd)
 		}
-		return m, nil
+		return m, errCmd
 
 	case progressUpdateMsg:
 		ev := msg.event
@@ -1499,6 +1588,12 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resumeTickMsg:
 		if m.resumePickerActive {
 			return m, m.resumeTick()
+		}
+		return m, nil
+
+	case clearTransientErrorMsg:
+		if msg.token == m.transientErrorToken {
+			m.transientErrorText = ""
 		}
 		return m, nil
 
@@ -2082,6 +2177,22 @@ func (m *MainModel) renderInputArea() string {
 		Render(m.input.View())
 
 	result.WriteString(inputBox)
+
+	// Transient error line (always reserved so the layout doesn't jump).
+	result.WriteString("\n")
+	errText := strings.TrimSpace(m.transientErrorText)
+	if errText != "" {
+		width := m.chatAreaWidth() - 2
+		if width < 10 {
+			width = m.chatAreaWidth()
+		}
+		// One line only; truncate with an ellipsis.
+		errText = truncate.StringWithTail(errText, uint(width), "…")
+		errLine := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colorError)).
+			Render(errText)
+		result.WriteString(errLine)
+	}
 
 	return result.String()
 }

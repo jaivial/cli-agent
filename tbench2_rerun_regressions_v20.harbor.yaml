@@ -5,6 +5,7 @@ orchestrator:
 
 agents:
   - import_path: eai_agent.agent:EaiAgent
+    override_timeout_sec: 1800
     override_setup_timeout_sec: 900
     kwargs:
       max_loops: 60
@@ -37,4 +38,3 @@ datasets:
 environment:
   type: docker
   delete: false
-

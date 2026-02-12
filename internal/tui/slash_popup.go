@@ -68,6 +68,8 @@ func (m *MainModel) slashPopupState() (key string, items []slashPopupItem) {
 	}
 
 	baseCommands := []slashPopupItem{
+		{Label: "/new", Description: "start a new session", InsertText: "/new"},
+		{Label: "/clear", Description: "clear chat (alias: /new)", InsertText: "/clear"},
 		{Label: "/connect", Description: "setup provider + API key", InsertText: "/connect"},
 		{Label: "/model", Description: "choose model", InsertText: "/model"},
 		{Label: "/resume", Description: "resume a previous session", InsertText: "/resume"},

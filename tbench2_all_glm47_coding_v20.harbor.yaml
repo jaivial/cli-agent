@@ -1,7 +1,12 @@
 job_name: tbench2-all-glm47-coding-v20
 
+orchestrator:
+  n_concurrent_trials: 2
+
 agents:
   - import_path: eai_agent.agent:EaiAgent
+    override_timeout_sec: 1800
+    override_setup_timeout_sec: 900
     kwargs:
       max_loops: 60
       base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
@@ -18,4 +23,3 @@ datasets:
 environment:
   type: docker
   delete: false
-

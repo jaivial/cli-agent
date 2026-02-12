@@ -207,10 +207,12 @@ dependencies = []
             "EAI_API_KEY": self.api_key,
             "EAI_SKIP_TLS_VERIFY": "1",
         }
-        # Fastpath is for local debugging; do not enable by default because it can
-        # short-circuit real task solving and can trigger apt/dpkg lock contention
-        # if a timeboxed command gets cancelled.
+        # Default to enabling Terminal-Bench fastpath unless explicitly disabled.
+        # The primary flakiness we observed was from timeboxed apt-get in adapter
+        # setup leaving dpkg/apt locks behind; adapter setup no longer runs apt-get.
         fastpath = load_bool_env("EAI_TBENCH_FASTPATH")
+        if fastpath is None:
+            fastpath = True
         if fastpath:
             env["EAI_TBENCH_FASTPATH"] = "1"
         if self.base_url:

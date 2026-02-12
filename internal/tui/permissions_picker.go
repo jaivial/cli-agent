@@ -3,10 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"cli-agent/internal/app"
 
+	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/truncate"
 )
@@ -33,28 +33,22 @@ func (m *MainModel) closePermissionsPicker() {
 	m.input.Focus()
 }
 
-func (m *MainModel) selectPermissionsAt(index int) string {
+func (m *MainModel) selectPermissionsAt(index int) (string, tea.Cmd) {
 	if index < 0 || index >= len(m.permissionsOptions) {
-		return ""
+		return "", nil
 	}
 	mode := app.NormalizePermissionsMode(m.permissionsOptions[index])
 	if m.app == nil {
-		return mode
+		return mode, nil
 	}
 
 	cfg := m.app.Config
 	cfg.Permissions = mode
 	if err := app.SaveConfig(cfg, app.DefaultConfigPath()); err != nil {
-		m.messages = append(m.messages, Message{
-			ID:        fmt.Sprintf("error-%d", time.Now().UnixNano()),
-			Role:      "error",
-			Content:   fmt.Sprintf("failed to save permissions: %v", err),
-			Timestamp: time.Now(),
-		})
-		return ""
+		return "", m.logAndShowError("failed to save permissions", err)
 	}
 	m.app.Config.Permissions = mode
-	return mode
+	return mode, nil
 }
 
 func (m *MainModel) renderPermissionsPicker() string {
@@ -126,4 +120,3 @@ func (m *MainModel) renderPermissionsPicker() string {
 		Width(width).
 		Render(b.String())
 }
-
