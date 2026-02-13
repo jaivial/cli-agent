@@ -10,12 +10,15 @@ import (
 )
 
 const (
-	DefaultBaseURL = "https://api.z.ai/api/paas/v4/chat/completions"
-	DefaultModel   = "glm-4.7"
-	ModelGLM5      = "glm-5"
+	DefaultBaseURL              = "https://api.z.ai/api/paas/v4/chat/completions"
+	DefaultModel                = "glm-4.7"
+	ModelGLM5                   = "glm-5"
+	ModelMiniMaxM25CodingPlan   = "codex-MiniMax-M2.5"
+	MiniMaxBaseURLInternational = "https://api.minimax.io/v1"
+	MiniMaxBaseURLChina         = "https://api.minimaxi.com/v1"
 )
 
-var SupportedModels = []string{DefaultModel, ModelGLM5}
+var SupportedModels = []string{DefaultModel, ModelGLM5, ModelMiniMaxM25CodingPlan}
 
 type Config struct {
 	APIKey            string `yaml:"eai_api_key"`
@@ -37,10 +40,12 @@ type Config struct {
 
 func NormalizeModel(model string) string {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case DefaultModel:
+	case strings.ToLower(DefaultModel):
 		return DefaultModel
-	case ModelGLM5:
+	case strings.ToLower(ModelGLM5):
 		return ModelGLM5
+	case strings.ToLower(ModelMiniMaxM25CodingPlan):
+		return ModelMiniMaxM25CodingPlan
 	default:
 		return DefaultModel
 	}
@@ -57,7 +62,12 @@ func NormalizeBaseURL(baseURL string) string {
 	if strings.Contains(strings.ToLower(url), "api.z.ai") {
 		return strings.TrimRight(url, "/")
 	}
-	// Enforce Z.AI as the only provider.
+	if strings.Contains(strings.ToLower(url), "api.minimax.io") {
+		return strings.TrimRight(url, "/")
+	}
+	if strings.Contains(strings.ToLower(url), "api.minimaxi.com") {
+		return strings.TrimRight(url, "/")
+	}
 	return DefaultBaseURL
 }
 

@@ -826,7 +826,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 
 		// Avoid confusing agent-loop failures when API key is missing.
 		if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
-			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 		}
 
 		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
@@ -859,7 +859,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 	out, err := completeChatWithProgress(ctx, a.Client, prompt, progress, true)
 	if err != nil {
 		if errors.Is(err, ErrAPIKeyRequired) {
-			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 		}
 		return "", err
 	}
@@ -900,7 +900,7 @@ func (a *Application) ExecuteAgentTaskInSessionWithProgressEvents(ctx context.Co
 
 	// Avoid confusing agent-loop failures when API key is missing.
 	if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
-		return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+		return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 	}
 
 	// Lightweight memory injection (recent turns + optional summary).
@@ -1122,7 +1122,7 @@ func (a *Application) ExecuteChatInSessionWithProgressEvents(
 		}
 		if err != nil {
 			if errors.Is(err, ErrAPIKeyRequired) {
-				return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+				return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
 			}
 			return "", err
 		}

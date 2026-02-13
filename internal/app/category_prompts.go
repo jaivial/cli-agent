@@ -404,6 +404,24 @@ You are a senior software engineer, DevOps specialist, and systems programmer. Y
 4. **Execute** - Run commands one at a time, verify each step
 5. **Verify** - Did it work? Check the results
 6. **Iterate** - If it did not work, try a different approach`,
+
+	"terminal_bench": `You are running Terminal-Bench 2.0 via Harbor (host-side orchestration + Docker).
+
+## Fast, correct run path
+1. Preflight (Docker + KVM):
+   {"tool":"exec","args":{"command":"PATH=\\\"$PWD/.venv/bin:$PATH\\\" ./harbor_preflight.sh --require-kvm","timeout":300}}
+
+2. Build Harbor-compatible binary:
+   {"tool":"exec","args":{"command":"./harbor_build_eai.sh","timeout":900}}
+
+3. Run + track (recommended):
+   {"tool":"exec","args":{"command":"PATH=\\\"$PWD/.venv/bin:$PATH\\\" ./harbor_run_and_track.sh tbench2_all_glm47_coding_v22.harbor.yaml","timeout":28800}}
+
+Notes:
+- If docker info fails with /var/run/docker.sock permission denied, run docker/harbor commands via: sg docker -c '...'
+  (or use ./harbor_run.sh which already does this).
+- Do NOT try to fix Docker group membership with sudo usermod ... unless the user explicitly approves
+  (it requires re-login to take effect).`,
 }
 
 // detectCategory analyzes a task description and returns the most appropriate category.
@@ -413,6 +431,14 @@ func detectCategory(task string) string {
 
 	// Compound task detection - check for multiple categories
 	categories := []string{}
+
+	// Terminal-Bench / Harbor benchmark detection.
+	if strings.Contains(taskLower, "terminal-bench") ||
+		strings.Contains(taskLower, "terminal bench") ||
+		strings.Contains(taskLower, "tbench") ||
+		strings.Contains(taskLower, "harbor") {
+		categories = append(categories, "terminal_bench")
+	}
 
 	// Git detection - distinguish between basic and advanced
 	if strings.Contains(taskLower, "git") {
@@ -527,6 +553,7 @@ func detectCategory(task string) string {
 
 	// Return first match from priority order
 	priority := []string{
+		"terminal_bench",
 		"git_advanced", "sqlite_advanced", "ml_recovery",
 		"polyglot_build", "security", "qemu", "vm",
 		"git", "database", "ml", "build", "devops",
@@ -598,4 +625,3 @@ func getRelatedCategories(primaryCategory string) []string {
 		return []string{}
 	}
 }
-

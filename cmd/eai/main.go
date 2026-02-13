@@ -30,6 +30,8 @@ const permissionsValues = "full-access|dangerously-full-access"
 func applyEnvOverrides(cfg *app.Config) {
 	if v := strings.TrimSpace(os.Getenv("EAI_API_KEY")); v != "" {
 		cfg.APIKey = v
+	} else if v := strings.TrimSpace(os.Getenv("MINIMAX_API_KEY")); v != "" {
+		cfg.APIKey = v
 	}
 	if v := strings.TrimSpace(os.Getenv("EAI_BASE_URL")); v != "" {
 		cfg.BaseURL = v
@@ -332,7 +334,7 @@ func main() {
 			} else {
 				applyEnvOverrides(&cfg)
 				if cfg.APIKey == "" {
-					return fmt.Errorf("EAI_API_KEY not set. Please set it in config or environment")
+					return fmt.Errorf("API key not set. Set EAI_API_KEY or MINIMAX_API_KEY, or run /connect in the TUI")
 				}
 			}
 			if err := applyFlagOverrides(cmd, &cfg); err != nil {

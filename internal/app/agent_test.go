@@ -490,6 +490,40 @@ func TestShouldAutoDetachServerCommand(t *testing.T) {
 	}
 }
 
+func TestExecCommandNeedsApproval_GitMutations(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{name: "git status (safe)", command: "git status", want: false},
+		{name: "git commit (needs approval)", command: "git commit -m \"msg\"", want: true},
+		{name: "git push (needs approval)", command: "git push origin main", want: true},
+		{name: "git reset --hard (needs approval)", command: "git reset --hard HEAD~1", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := execCommandNeedsApproval(tt.command)
+			if got != tt.want {
+				t.Fatalf("execCommandNeedsApproval(%q)=%v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactSecrets_ReplacesKnownAPIKey(t *testing.T) {
+	secret := "b0f5648699f54af9bd43b7497152618d.PFU6a5WHDou4YyeX"
+	input := "eai_api_key: " + secret + "\nexport EAI_API_KEY=\"" + secret + "\"\n"
+	out := RedactSecrets(input, secret)
+	if strings.Contains(out, secret) {
+		t.Fatalf("expected secret to be redacted, got: %q", out)
+	}
+	if !strings.Contains(out, redactedPlaceholder) {
+		t.Fatalf("expected redaction placeholder %q, got: %q", redactedPlaceholder, out)
+	}
+}
+
 // TestExecuteTool_ListDir tests the list_dir tool
 func TestExecuteTool_ListDir(t *testing.T) {
 	l := createTestAgentLoop()

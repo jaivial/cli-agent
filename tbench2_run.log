@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/home/jaime/Downloads/projects/cli-agent/tbench2_harness.py", line 238, in <module>
+    main()
+  File "/home/jaime/Downloads/projects/cli-agent/tbench2_harness.py", line 230, in main
+    results = harness.run_benchmark(task_limit=args.limit, timeout_sec=args.timeout)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jaime/Downloads/projects/cli-agent/tbench2_harness.py", line 122, in run_benchmark
+    tasks = self.get_task_list()[:task_limit]
+            ^^^^^^^^^^^^^^^^^^^^
+  File "/home/jaime/Downloads/projects/cli-agent/tbench2_harness.py", line 42, in get_task_list
+    return sorted([d.name for d in self.tasks_dir.iterdir() 
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1058, in iterdir
+    for name in os.listdir(self):
+                ^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/root/clawd/terminal-bench-2.0'

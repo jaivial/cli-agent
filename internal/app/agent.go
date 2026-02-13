@@ -30,10 +30,10 @@ var retryableErrors = []string{
 }
 
 var (
-	indexTitleRe = regexp.MustCompile(`(?is)<title[^>]*>\s*([^<]{3,120})\s*</title>`)
-	indexScriptRe = regexp.MustCompile(`(?is)<script[^>]*\ssrc=["']([^"']+)["']`)
-	indexTokenRe = regexp.MustCompile(`[A-Za-z0-9._/\-]{10,}`)
-	localServerURLRe = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d{2,5})?`)
+	indexTitleRe             = regexp.MustCompile(`(?is)<title[^>]*>\s*([^<]{3,120})\s*</title>`)
+	indexScriptRe            = regexp.MustCompile(`(?is)<script[^>]*\ssrc=["']([^"']+)["']`)
+	indexTokenRe             = regexp.MustCompile(`[A-Za-z0-9._/\-]{10,}`)
+	localServerURLRe         = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d{2,5})?`)
 	autoDetachServerPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\bnpm\s+run\s+dev\b`),
 		regexp.MustCompile(`(?i)\bnpm\s+(run\s+)?start\b`),
@@ -785,7 +785,7 @@ loop:
 			if isLikelyConfigError(err) || ctx.Err() != nil {
 				state.Messages = append(state.Messages, AgentMessage{
 					Role:      "assistant",
-					Content:   fmt.Sprintf("Error: %v", err),
+					Content:   RedactSecrets(fmt.Sprintf("Error: %v", err), l.apiKeyForRedaction()),
 					Timestamp: time.Now(),
 				})
 				break
@@ -796,7 +796,7 @@ loop:
 			if apiErrorStreak > 8 {
 				state.Messages = append(state.Messages, AgentMessage{
 					Role:      "assistant",
-					Content:   fmt.Sprintf("Error: %v", err),
+					Content:   RedactSecrets(fmt.Sprintf("Error: %v", err), l.apiKeyForRedaction()),
 					Timestamp: time.Now(),
 				})
 				break
@@ -815,7 +815,7 @@ loop:
 
 		state.Messages = append(state.Messages, AgentMessage{
 			Role:      "assistant",
-			Content:   response,
+			Content:   RedactSecrets(response, l.apiKeyForRedaction()),
 			Timestamp: time.Now(),
 		})
 
@@ -882,7 +882,7 @@ loop:
 		if len(toolCalls) == 0 {
 			if l.FinalResponseValidator != nil && l.FinalResponseValidator(response) {
 				state.Completed = true
-				state.FinalOutput = strings.TrimSpace(response)
+				state.FinalOutput = RedactSecrets(strings.TrimSpace(response), l.apiKeyForRedaction())
 				break
 			}
 
@@ -975,7 +975,7 @@ loop:
 				}
 
 				state.Completed = true
-				state.FinalOutput = response
+				state.FinalOutput = RedactSecrets(response, l.apiKeyForRedaction())
 				break
 			}
 
@@ -1055,11 +1055,12 @@ loop:
 	}
 
 	state.EndedAt = time.Now()
-	l.saveState(state)
 
 	if !state.Completed && state.FinalOutput == "" {
 		state.FinalOutput = fmt.Sprintf("Task did not complete within %d iterations", l.MaxLoops)
 	}
+	state.FinalOutput = RedactSecrets(state.FinalOutput, l.apiKeyForRedaction())
+	l.saveState(state)
 
 	return state, nil
 }
@@ -1338,7 +1339,21 @@ func (l *AgentLoop) emitProgress(ev ProgressEvent) {
 	if ev.At.IsZero() {
 		ev.At = time.Now()
 	}
+	// Never emit API keys or other configured secrets into the UI/log stream.
+	ev.Text = RedactSecrets(ev.Text, l.apiKeyForRedaction())
+	ev.Error = RedactSecrets(ev.Error, l.apiKeyForRedaction())
+	ev.Path = RedactSecrets(ev.Path, l.apiKeyForRedaction())
+	ev.Command = RedactSecrets(ev.Command, l.apiKeyForRedaction())
+	ev.OldContent = RedactSecrets(ev.OldContent, l.apiKeyForRedaction())
+	ev.NewContent = RedactSecrets(ev.NewContent, l.apiKeyForRedaction())
 	l.Progress(ev)
+}
+
+func (l *AgentLoop) apiKeyForRedaction() string {
+	if l == nil || l.Client == nil {
+		return ""
+	}
+	return strings.TrimSpace(l.Client.APIKey)
 }
 
 func (l *AgentLoop) toolProgressDetails(call ToolCall) (path, command string) {
@@ -1413,6 +1428,8 @@ func execCommandNeedsApproval(command string) bool {
 	dangerous := []string{
 		"sudo ", "sudo	", "sudo-", " su ", "pkexec ", "doas ", "runas ",
 		"rm -rf", "rm -fr", "rm -r ", "rm -r/", "rm -r.", "rm -r..", "rmdir /s", "del /s", "del /q", "format ", "mkfs", "dd if=",
+		// Git operations that mutate history or working tree in ways that are hard to undo.
+		"git commit", "git push", "git tag", "git rebase", "git merge", "git cherry-pick", "git revert",
 		"git reset --hard", "git clean -fd", "git clean -ff", "git checkout --",
 		"systemctl ", "service ", "launchctl ", "sc ", "net stop", "net start", "shutdown", "reboot", "poweroff", "halt",
 		"chmod ", "chown ", "setfacl ", "icacls ",
@@ -1613,15 +1630,18 @@ func isSudoAuthenticationFailure(err error, output []byte) bool {
 	return false
 }
 
-func runShellCommand(ctx context.Context, shell string, shellArgs []string, dir string) ([]byte, error) {
+func runShellCommand(ctx context.Context, shell string, shellArgs []string, dir string, env []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, shell, shellArgs...)
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
 	}
+	if len(env) > 0 {
+		cmd.Env = env
+	}
 	return runCommandWithCapturedOutput(cmd)
 }
 
-func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []string, dir string) (output []byte, err error, attempted bool) {
+func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []string, dir string, env []string) (output []byte, err error, attempted bool) {
 	if IsProcessRoot() {
 		return nil, nil, false
 	}
@@ -1632,6 +1652,170 @@ func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []stri
 	cmd := exec.CommandContext(ctx, "sudo", sudoArgs...)
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = env
+	}
+	out, runErr := runCommandWithCapturedOutput(cmd)
+	return out, runErr, true
+}
+
+var dockerGroupErrMarkers = []string{
+	"permission denied while trying to connect to the docker daemon socket",
+	"dial unix /var/run/docker.sock: connect: permission denied",
+	"got permission denied while trying to connect to the docker daemon socket",
+}
+
+func isDockerGroupPermissionFailure(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(string(output)))
+	if e := strings.TrimSpace(err.Error()); e != "" {
+		if text != "" {
+			text += "\n"
+		}
+		text += strings.ToLower(e)
+	}
+	for _, marker := range dockerGroupErrMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandLikelyNeedsDockerGroup(command string) bool {
+	cmd := strings.ToLower(strings.TrimSpace(command))
+	if cmd == "" {
+		return false
+	}
+	// Avoid double-wrapping.
+	if strings.Contains(cmd, "sg docker -c") || strings.Contains(cmd, "newgrp docker") {
+		return false
+	}
+	needles := []string{
+		"docker ",
+		"docker-compose",
+		"docker compose",
+		"harbor ",
+		"harbor_",
+		"./harbor_",
+		"terminal-bench",
+		"terminal bench",
+		"tbench",
+	}
+	for _, n := range needles {
+		if strings.Contains(cmd, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandLikelyNeedsEAIKey(command string) bool {
+	cmd := strings.ToLower(strings.TrimSpace(command))
+	if cmd == "" {
+		return false
+	}
+	needles := []string{
+		"eai_api_key",
+		"terminal-bench",
+		"terminal bench",
+		"tbench",
+		"harbor ",
+		"harbor_",
+		"./harbor_",
+	}
+	for _, n := range needles {
+		if strings.Contains(cmd, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func envGet(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return strings.TrimPrefix(kv, prefix), true
+		}
+	}
+	return "", false
+}
+
+func envSet(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			if !replaced {
+				out = append(out, prefix+value)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	if !replaced {
+		out = append(out, prefix+value)
+	}
+	return out
+}
+
+func envPrependPath(env []string, prefix string) []string {
+	if strings.TrimSpace(prefix) == "" {
+		return env
+	}
+	current, ok := envGet(env, "PATH")
+	if !ok || strings.TrimSpace(current) == "" {
+		return envSet(env, "PATH", prefix)
+	}
+	// Avoid duplication.
+	parts := strings.Split(current, string(os.PathListSeparator))
+	for _, p := range parts {
+		if p == prefix {
+			return env
+		}
+	}
+	return envSet(env, "PATH", prefix+string(os.PathListSeparator)+current)
+}
+
+func runShellCommandWithDockerGroup(ctx context.Context, shell string, shellArgs []string, dir string, env []string) (output []byte, err error, attempted bool) {
+	if _, lookErr := exec.LookPath("sg"); lookErr != nil {
+		return nil, nil, false
+	}
+	// Best-effort check that docker group exists; if it doesn't, sg will fail anyway,
+	// but we can avoid a confusing retry.
+	if _, lookErr := exec.LookPath("getent"); lookErr == nil {
+		getent := exec.CommandContext(ctx, "getent", "group", "docker")
+		if strings.TrimSpace(dir) != "" {
+			getent.Dir = dir
+		}
+		if len(env) > 0 {
+			getent.Env = env
+		}
+		if err := getent.Run(); err != nil {
+			return nil, nil, false
+		}
+	}
+
+	// Build a command string for `sg docker -c ...`.
+	// We intentionally keep this simple: `shellArgs` should be `-lc <cmd>` or `-c <cmd>`.
+	cmdStr := shell
+	if len(shellArgs) > 0 {
+		cmdStr += " " + strings.Join(shellArgs[:len(shellArgs)-1], " ")
+		cmdStr += " " + shellSingleQuote(shellArgs[len(shellArgs)-1])
+	}
+
+	cmd := exec.CommandContext(ctx, "sg", "docker", "-c", cmdStr)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = env
 	}
 	out, runErr := runCommandWithCapturedOutput(cmd)
 	return out, runErr, true
@@ -2187,6 +2371,9 @@ func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) 
 
 	l.emitToolProgress(call, "pending", 0, "")
 	result := l.executeTool(ctx, call)
+	// Ensure we never persist/display API keys in tool output/errors.
+	result.Output = RedactSecrets(result.Output, l.apiKeyForRedaction())
+	result.Error = RedactSecrets(result.Error, l.apiKeyForRedaction())
 	status := "completed"
 	errText := ""
 	if !result.Success {
@@ -2839,11 +3026,26 @@ func (l *AgentLoop) defaultExecTimeout(command string) time.Duration {
 	}
 
 	long := 10 * time.Minute
+	veryLong := 8 * time.Hour
 
 	cmdLower := strings.ToLower(command)
 	if shouldAutoDetachServerCommand(command) {
 		// Foreground dev servers are long-lived; keep timeout modest so we can detach/verify quickly.
 		return 45 * time.Second
+	}
+	veryLongKeywords := []string{
+		"harbor jobs start",
+		"harbor run",
+		"harbor_run",
+		"terminal-bench",
+		"terminal bench",
+		"tbench2",
+		"tbench",
+	}
+	for _, kw := range veryLongKeywords {
+		if strings.Contains(cmdLower, kw) {
+			return veryLong
+		}
 	}
 	longKeywords := []string{
 		"apt-get", "apt ", "pip install", "pip3 install", "uv pip", "conda", "mamba",
@@ -3080,7 +3282,37 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			runDir = l.WorkDir
 		}
 
-		output, err := runShellCommand(ctx, shell, shellArgs, runDir)
+		execEnv := os.Environ()
+		if strings.TrimSpace(runDir) != "" {
+			venvBin := filepath.Join(runDir, ".venv", "bin")
+			if st, err := os.Stat(venvBin); err == nil && st.IsDir() {
+				execEnv = envPrependPath(execEnv, venvBin)
+			}
+		}
+		if commandLikelyNeedsEAIKey(args.Command) {
+			if key := l.apiKeyForRedaction(); key != "" {
+				if _, ok := envGet(execEnv, "EAI_API_KEY"); !ok {
+					execEnv = envSet(execEnv, "EAI_API_KEY", key)
+				}
+			}
+		}
+
+		var (
+			output       []byte
+			err          error
+			dockerSgUsed bool
+		)
+		if commandLikelyNeedsDockerGroup(args.Command) && !commandContainsSudo(args.Command) {
+			if out, runErr, attempted := runShellCommandWithDockerGroup(ctx, shell, shellArgs, runDir, execEnv); attempted {
+				output = out
+				err = runErr
+				dockerSgUsed = true
+			} else {
+				output, err = runShellCommand(ctx, shell, shellArgs, runDir, execEnv)
+			}
+		} else {
+			output, err = runShellCommand(ctx, shell, shellArgs, runDir, execEnv)
+		}
 
 		// In dangerously-full-access mode, retry permission failures with
 		// non-interactive sudo when possible.
@@ -3089,7 +3321,7 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			!commandContainsSudo(args.Command) &&
 			isPermissionDeniedFailure(err, output) {
 
-			sudoOutput, sudoErr, attempted := runShellCommandWithSudo(ctx, shell, shellArgs, runDir)
+			sudoOutput, sudoErr, attempted := runShellCommandWithSudo(ctx, shell, shellArgs, runDir, execEnv)
 			if attempted {
 				output = sudoOutput
 				err = sudoErr
@@ -3097,6 +3329,11 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 					result.Error = "elevation failed: sudo requires cached/passwordless auth. Run `sudo -v` (or relaunch as root/admin) and retry."
 				}
 			}
+		}
+		if err != nil && !dockerSgUsed && isDockerGroupPermissionFailure(err, output) {
+			// Give a more actionable error message for a very common Harbor failure mode.
+			// The user may need to re-login after joining the docker group, or run via `sg docker -c ...`.
+			result.Error = "docker permission denied: your user can't access /var/run/docker.sock in this session. Fix: re-login after adding user to docker group, or run docker/harbor commands via `sg docker -c ...`."
 		}
 
 		postVerificationNotes := []string{}

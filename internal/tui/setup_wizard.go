@@ -24,6 +24,9 @@ const (
 
 	authCodingPlan = "Coding Plan"
 	authAPIKey     = "API Key"
+
+	regionInternational = "International"
+	regionChina         = "China"
 )
 
 type SetupWizard struct {
@@ -39,9 +42,11 @@ type SetupWizard struct {
 
 	providers []string
 	authModes []string
+	regions   []string
 
 	providerIndex int
 	authModeIndex int
+	regionIndex   int
 }
 
 func NewSetupWizard(cfg *app.Config) *SetupWizard {
@@ -57,6 +62,7 @@ func NewSetupWizard(cfg *app.Config) *SetupWizard {
 		step:      stepProvider,
 		providers: []string{providerMiniMax, providerZAI},
 		authModes: []string{authCodingPlan, authAPIKey},
+		regions:   []string{regionInternational, regionChina},
 		// Start with z.ai selected by default.
 		providerIndex: 1,
 	}
@@ -83,11 +89,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case stepAPIKey:
 				s.statusMsg = ""
 				s.input.Blur()
-				if s.selectedProvider() == providerZAI {
-					s.step = stepAuthMethod
-				} else {
-					s.step = stepProvider
-				}
+				s.step = stepAuthMethod
 				return s, nil
 			case stepAuthMethod:
 				s.statusMsg = ""
@@ -102,13 +104,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch s.step {
 			case stepProvider:
 				s.statusMsg = ""
-				if s.selectedProvider() == providerZAI {
-					s.step = stepAuthMethod
-				} else {
-					s.step = stepAPIKey
-					s.input.SetValue("")
-					s.input.Focus()
-				}
+				s.step = stepAuthMethod
 				return s, nil
 			case stepAuthMethod:
 				s.statusMsg = ""
@@ -124,23 +120,7 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Save config and apply selected provider/mode.
-				s.cfg.APIKey = s.apiKey
-				s.cfg.Model = app.DefaultModel
-				if s.cfg.MaxTokens <= 0 {
-					s.cfg.MaxTokens = app.DefaultConfig().MaxTokens
-				}
-				s.cfg.Installed = true
-
-				if s.selectedProvider() == providerZAI {
-					if s.selectedAuthMode() == authCodingPlan {
-						s.cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4"
-					} else {
-						s.cfg.BaseURL = "https://api.z.ai/api/paas/v4"
-					}
-				} else {
-					// MiniMax entry remains available as requested.
-					s.cfg.BaseURL = "https://api.z.ai/api/paas/v4"
-				}
+				s.applyConfigSelections()
 
 				if err := app.SaveConfig(*s.cfg, app.DefaultConfigPath()); err != nil {
 					appendTUIErrorLog("connect save", "", err.Error())
@@ -165,13 +145,24 @@ func (s *SetupWizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return s, nil
 				}
 			case stepAuthMethod:
-				switch msg.String() {
-				case "up", "k":
-					s.authModeIndex = (s.authModeIndex - 1 + len(s.authModes)) % len(s.authModes)
-					return s, nil
-				case "down", "j":
-					s.authModeIndex = (s.authModeIndex + 1) % len(s.authModes)
-					return s, nil
+				if s.selectedProvider() == providerZAI {
+					switch msg.String() {
+					case "up", "k":
+						s.authModeIndex = (s.authModeIndex - 1 + len(s.authModes)) % len(s.authModes)
+						return s, nil
+					case "down", "j":
+						s.authModeIndex = (s.authModeIndex + 1) % len(s.authModes)
+						return s, nil
+					}
+				} else {
+					switch msg.String() {
+					case "up", "k":
+						s.regionIndex = (s.regionIndex - 1 + len(s.regions)) % len(s.regions)
+						return s, nil
+					case "down", "j":
+						s.regionIndex = (s.regionIndex + 1) % len(s.regions)
+						return s, nil
+					}
 				}
 			case stepAPIKey:
 				s.input, cmd = s.input.Update(msg)
@@ -232,27 +223,54 @@ func (s *SetupWizard) View() string {
 		}
 		b.WriteString("\n")
 	case stepAuthMethod:
-		b.WriteString(subtitleStyle.Render("step 2/3: z.ai auth mode"))
-		b.WriteString("\n\n")
-		for i, p := range s.authModes {
-			prefix := "  "
-			if i == s.authModeIndex {
-				prefix = "❯ "
-			}
-			b.WriteString(prefix + p + "\n")
+		if s.selectedProvider() == providerZAI {
+			b.WriteString(subtitleStyle.Render("step 2/3: z.ai auth mode"))
+		} else {
+			b.WriteString(subtitleStyle.Render("step 2/3: MiniMax region"))
 		}
-		b.WriteString("\n")
-		if s.selectedAuthMode() == authCodingPlan {
-			b.WriteString(hintStyle.Render("docs index: https://docs.z.ai/llms.txt"))
+		b.WriteString("\n\n")
+		if s.selectedProvider() == providerZAI {
+			for i, p := range s.authModes {
+				prefix := "  "
+				if i == s.authModeIndex {
+					prefix = "❯ "
+				}
+				b.WriteString(prefix + p + "\n")
+			}
 			b.WriteString("\n")
-			b.WriteString(hintStyle.Render("coding plan base url: https://api.z.ai/api/coding/paas/v4"))
+			if s.selectedAuthMode() == authCodingPlan {
+				b.WriteString(hintStyle.Render("docs index: https://docs.z.ai/llms.txt"))
+				b.WriteString("\n")
+				b.WriteString(hintStyle.Render("coding plan base url: https://api.z.ai/api/coding/paas/v4"))
+				b.WriteString("\n\n")
+			}
+		} else {
+			for i, p := range s.regions {
+				prefix := "  "
+				if i == s.regionIndex {
+					prefix = "❯ "
+				}
+				b.WriteString(prefix + p + "\n")
+			}
+			b.WriteString("\n")
+			b.WriteString(hintStyle.Render("International: https://api.minimax.io/v1"))
+			b.WriteString("\n")
+			b.WriteString(hintStyle.Render("China: https://api.minimaxi.com/v1"))
 			b.WriteString("\n\n")
 		}
 	case stepAPIKey:
-		b.WriteString(subtitleStyle.Render("step 3/3: enter EAI_API_KEY"))
+		if s.selectedProvider() == providerMiniMax {
+			b.WriteString(subtitleStyle.Render("step 3/3: enter MINIMAX_API_KEY"))
+		} else {
+			b.WriteString(subtitleStyle.Render("step 3/3: enter EAI_API_KEY"))
+		}
 		b.WriteString("\n\n")
 		b.WriteString(inputBoxStyle.Render(s.input.View()))
 		b.WriteString("\n\n")
+		if s.selectedProvider() == providerMiniMax {
+			b.WriteString(hintStyle.Render("tip: clear OPENAI_API_KEY and OPENAI_BASE_URL in this shell to avoid conflicts"))
+			b.WriteString("\n\n")
+		}
 	}
 
 	// Error message
@@ -290,7 +308,7 @@ func (s *SetupWizard) Summary() string {
 		}
 		return "connected: z.ai (API Key)"
 	}
-	return "connected: MiniMax"
+	return "connected: MiniMax (Coding Plan, " + s.selectedRegion() + ")"
 }
 
 func (s *SetupWizard) selectedProvider() string {
@@ -305,4 +323,36 @@ func (s *SetupWizard) selectedAuthMode() string {
 		return authCodingPlan
 	}
 	return s.authModes[s.authModeIndex]
+}
+
+func (s *SetupWizard) selectedRegion() string {
+	if s.regionIndex < 0 || s.regionIndex >= len(s.regions) {
+		return regionInternational
+	}
+	return s.regions[s.regionIndex]
+}
+
+func (s *SetupWizard) applyConfigSelections() {
+	s.cfg.APIKey = s.apiKey
+	if s.cfg.MaxTokens <= 0 {
+		s.cfg.MaxTokens = app.DefaultConfig().MaxTokens
+	}
+	s.cfg.Installed = true
+
+	if s.selectedProvider() == providerZAI {
+		s.cfg.Model = app.DefaultModel
+		if s.selectedAuthMode() == authCodingPlan {
+			s.cfg.BaseURL = "https://api.z.ai/api/coding/paas/v4"
+		} else {
+			s.cfg.BaseURL = "https://api.z.ai/api/paas/v4"
+		}
+		return
+	}
+
+	s.cfg.Model = app.ModelMiniMaxM25CodingPlan
+	if s.selectedRegion() == regionChina {
+		s.cfg.BaseURL = app.MiniMaxBaseURLChina
+	} else {
+		s.cfg.BaseURL = app.MiniMaxBaseURLInternational
+	}
 }

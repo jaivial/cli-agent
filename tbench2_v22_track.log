@@ -1,0 +1,7 @@
+job: tbench2-all-glm47-coding-v22-20260213_153356
+dir: jobs/tbench2-all-glm47-coding-v22-20260213_153356
+total: 89
+pid: 133138
+stdout: jobs/tbench2-all-glm47-coding-v22-20260213_153356/harbor.stdout.log
+job.log: jobs/tbench2-all-glm47-coding-v22-20260213_153356/job.log
+15:33:56 progress: completed=0/89 started=0/89 in_flight=0
