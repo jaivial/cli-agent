@@ -2141,7 +2141,7 @@ func buildOrchestrateSubtaskRetryPrompt(subtask, fullTask string, attempt int) s
 	return fmt.Sprintf("Retry only the failed subtask. Return only the concrete output for this item.\n\nSubtask:\n%s", subtask)
 }
 
-var orchestrateListMarkerRE = regexp.MustCompile(`(?i)^\s*(?:(?:[-*+•]\s*(?:\[[ xX]\]\s*)?|\d+\s*[\.)]|\d+\s*[-–—]\s+|\([a-zA-Z0-9]{1,4}\)|[a-zA-Z][.)]|[a-zA-Z]\)|\b(?:step|paso)\s+\d+[:\.\)])\s+(.*)$`)
+var orchestrateListMarkerRE = regexp.MustCompile(`(?i)^\s*(?:(?:[-*+•]\s*(?:\[[ xX]\]\s*)?|\d+\s*[\.)]|\d+\s*[-–—]\s+|\([a-zA-Z0-9]{1,4}\)|[a-zA-Z][.)]|[a-zA-Z]\)|\b(?:step|paso)\s+\d+[:\.\)]))\s+(.*)$`)
 
 func buildOrchestrateSubtaskPrompt(index, total int, subtask, fullTask string) string {
 	fullTask = strings.TrimSpace(fullTask)

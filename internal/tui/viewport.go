@@ -2781,7 +2781,7 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 		var response string
 		var err error
 		if m.mode == app.ModeOrchestrate {
-			response, err = m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, workDir, query, cb)
+			response, err = m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, m.mode, query, cb)
 		} else {
 			response, err = m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb, m.permissionDecisionCh)
 		}

@@ -185,18 +185,28 @@ install_tmux_if_missing() {
 download_binary() {
     local binary_path="${INSTALL_DIR}/${BINARY_NAME}"
     log_info "Building from source..."
-    
-    TEMP_DIR=$(mktemp -d)
-    cd "${TEMP_DIR}"
-    git clone --depth 1 "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" 2>/dev/null || \
-    git clone --depth 1 "https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
-    
-    cd "${REPO_NAME}/cli-agent"
+
+    local build_dir=""
+    local temp_dir=""
+    if [[ -f "cmd/eai/main.go" ]]; then
+        log_info "Building from current directory..."
+        build_dir="$(pwd)"
+    else
+        temp_dir=$(mktemp -d)
+        cd "${temp_dir}"
+        git clone --depth 1 "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" 2>/dev/null || \
+        git clone --depth 1 "https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+        build_dir="${temp_dir}/${REPO_NAME}"
+    fi
+
+    cd "${build_dir}"
     CGO_ENABLED=0 go build -ldflags="-s -w" -o "${binary_path}" ./cmd/eai/ 2>/dev/null || \
     go build -o "${binary_path}" ./cmd/eai/
-    
-    cd /
-    rm -rf "${TEMP_DIR}"
+
+    if [[ -n "${temp_dir}" ]]; then
+        cd /
+        rm -rf "${temp_dir}"
+    fi
     
     chmod +x "${binary_path}"
     log_success "Installed to ${binary_path}"
