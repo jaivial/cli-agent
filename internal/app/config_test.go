@@ -41,3 +41,10 @@ func TestNormalizeModel_AllowsMiniMaxCodingPlan(t *testing.T) {
 		t.Fatalf("NormalizeModel(minimax coding plan) = %q, want %q", got, ModelMiniMaxM25CodingPlan)
 	}
 }
+
+func TestDefaultConfig_ModeIsOrchestrate(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.DefaultMode != "orchestrate" {
+		t.Fatalf("DefaultConfig().DefaultMode = %q, want %q", cfg.DefaultMode, "orchestrate")
+	}
+}

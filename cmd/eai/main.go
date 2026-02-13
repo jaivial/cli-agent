@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,14 @@ const (
 )
 
 const permissionsValues = "full-access|dangerously-full-access"
+
+const (
+	orchestrateWorkerCommand = "orchestrate-worker"
+	orchestrateWorkerEnvVar  = "EAI_TMUX_WORKER"
+	noTmuxEnvVar            = "EAI_NO_TMUX"
+)
+
+var isInteractiveTerminalFn = isInteractiveTerminal
 
 func applyEnvOverrides(cfg *app.Config) {
 	if v := strings.TrimSpace(os.Getenv("EAI_API_KEY")); v != "" {
@@ -118,6 +128,151 @@ func getBinaryPath() string {
 	return exe
 }
 
+func isInteractiveTerminal() bool {
+	in, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	out, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return in.Mode()&os.ModeCharDevice != 0 && out.Mode()&os.ModeCharDevice != 0
+}
+
+func shouldAutoLaunchInTmux(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	name := strings.TrimSpace(cmd.Name())
+	if name == "" {
+		return false
+	}
+	if name == "help" || name == "install" || name == "completion" || name == orchestrateWorkerCommand {
+		return false
+	}
+	if helpFlag, err := cmd.Flags().GetBool("help"); err == nil && helpFlag {
+		return false
+	}
+	if os.Getenv(orchestrateWorkerEnvVar) == "1" {
+		return false
+	}
+	if os.Getenv(noTmuxEnvVar) != "" {
+		return false
+	}
+	if os.Getenv("TMUX") != "" {
+		return false
+	}
+	if !isInteractiveTerminalFn() {
+		return false
+	}
+	if cmd.Name() == "eai" {
+		if versionFlag, err := cmd.Flags().GetBool("version"); err == nil && versionFlag {
+			return false
+		}
+		if completionFlag, err := cmd.Flags().GetString("completion"); err == nil && strings.TrimSpace(completionFlag) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func launchCurrentProcessInTmux(argv []string) error {
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("tmux is required but missing: %w", err)
+	}
+	binary := getBinaryPath()
+	if strings.TrimSpace(binary) == "" {
+		return fmt.Errorf("unable to determine current binary path")
+	}
+
+	session := fmt.Sprintf("eai-%d", os.Getpid())
+	args := append([]string{"new-session", "-A", "-s", session, binary}, argv...)
+	cmd := exec.Command(tmuxPath, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	os.Exit(0)
+	return nil
+}
+
+type orchestrateWorkerResult struct {
+	ShardID   string `json:"shard_id"`
+	Attempt   int    `json:"attempt"`
+	Output    string `json:"output"`
+	Error     string `json:"error"`
+	CacheHit  bool   `json:"cache_hit"`
+	DurationMs int64 `json:"duration_ms"`
+}
+
+func runOrchestrateWorkerCommand() error {
+	shardID := strings.TrimSpace(orchestrateWorkerShardID)
+	prompt := strings.TrimSpace(orchestrateWorkerPrompt)
+	resultFile := strings.TrimSpace(orchestrateWorkerResultFile)
+	if resultFile == "" {
+		return fmt.Errorf("missing --result-file")
+	}
+	if prompt == "" {
+		return fmt.Errorf("missing --prompt")
+	}
+	if shardID == "" {
+		shardID = "worker"
+	}
+
+	configPath := app.DefaultConfigPath()
+	cfg, err := app.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	applyEnvOverrides(&cfg)
+
+	application, err := app.NewApplication(cfg, false)
+	if err != nil {
+		return err
+	}
+	if application == nil || application.Client == nil {
+		return fmt.Errorf("worker initialization failed")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+	out, completionErr := application.Client.Complete(ctx, prompt)
+	duration := time.Since(start)
+
+	result := orchestrateWorkerResult{
+		ShardID:   shardID,
+		Attempt:   orchestrateWorkerAttempt,
+		Output:    out,
+		DurationMs: duration.Milliseconds(),
+		CacheHit:  false,
+	}
+	if completionErr != nil {
+		result.Error = completionErr.Error()
+	}
+
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("encode worker output: %w", err)
+	}
+
+	tmp := resultFile + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return fmt.Errorf("write worker output: %w", err)
+	}
+	if err := os.Rename(tmp, resultFile); err != nil {
+		return fmt.Errorf("write worker output: %w", err)
+	}
+
+	return nil
+}
+
 func generateCompletion(shell string) error {
 	switch shell {
 	case "bash":
@@ -173,6 +328,12 @@ func main() {
 		Short:   "EAI - CLI agent powered by Z.AI",
 		Long:    "EAI is an interactive CLI agent powered by Z.AI models.\n\nUse without arguments for TUI mode, or with the 'agent' subcommand for automated task execution.\n\nFor more information, visit: " + repoURL,
 		Version: version,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if shouldAutoLaunchInTmux(cmd) {
+				return launchCurrentProcessInTmux(append([]string{}, os.Args[1:]...))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if v, _ := cmd.Flags().GetBool("version"); v {
 				fmt.Printf("EAI CLI Agent v%s\n", version)
@@ -249,7 +410,7 @@ func main() {
 		},
 	}
 
-	root.Flags().String("mode", "do", "mode: do (TUI), plus ask|architect|plan|do|code|debug|orchestrate for --no-tui")
+	root.Flags().String("mode", "orchestrate", "mode: orchestrate (default), plus ask|architect|plan|do|code|debug for --no-tui")
 	root.Flags().BoolP("no-tui", "n", false, "Use simple REPL instead of TUI")
 	root.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.Flags().BoolP("version", "v", false, "Print version information")
@@ -460,9 +621,23 @@ func main() {
 			return err
 		},
 	}
-	resumeCmd.Flags().String("mode", "create", "mode: plan|create")
+	resumeCmd.Flags().String("mode", "orchestrate", "mode: plan|create|orchestrate")
 	resumeCmd.Flags().Bool("mock", false, "Use mock client (no API calls)")
 	root.AddCommand(resumeCmd)
+
+	workerCmd := &cobra.Command{
+		Use:    orchestrateWorkerCommand,
+		Hidden: true,
+		Short:  "internal orchestrator shard worker",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runOrchestrateWorkerCommand()
+		},
+	}
+	workerCmd.Flags().StringVar(&orchestrateWorkerShardID, "shard-id", "", "internal shard id")
+	workerCmd.Flags().StringVar(&orchestrateWorkerPrompt, "prompt", "", "internal shard prompt")
+	workerCmd.Flags().StringVar(&orchestrateWorkerResultFile, "result-file", "", "internal result file")
+	workerCmd.Flags().IntVar(&orchestrateWorkerAttempt, "attempt", 1, "internal attempt number")
+	root.AddCommand(workerCmd)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -471,6 +646,11 @@ func main() {
 }
 
 var (
+	orchestrateWorkerAttempt  int
+	orchestrateWorkerPrompt   string
+	orchestrateWorkerResultFile string
+	orchestrateWorkerShardID  string
+
 	agentMaxLoops int
 	agentTask     string
 	agentMock     bool

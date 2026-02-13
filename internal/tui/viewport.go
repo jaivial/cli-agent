@@ -222,7 +222,7 @@ type clearTransientErrorMsg struct {
 }
 
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-var modes = []app.Mode{app.ModeDo}
+var modes = []app.Mode{app.ModeOrchestrate, app.ModeCreate, app.ModeDo}
 
 func looksLikeWebsiteHTMLRequest(query string) bool {
 	s := strings.ToLower(strings.TrimSpace(query))
@@ -245,9 +245,6 @@ func looksLikeWebsiteHTMLRequest(query string) bool {
 }
 
 func NewMainModel(application *app.Application, mode app.Mode) *MainModel {
-	// The TUI always runs the tool-driven agent loop (like `eai agent`).
-	mode = app.ModeDo
-
 	ta := textarea.New()
 	ta.Placeholder = "message... (/ for commands, /new new chat, esc cancel, enter send)"
 	ta.Focus()
@@ -2771,6 +2768,9 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 				progressCh <- ev
 			}
 		}
+		if m.app == nil {
+			return aiResponseMsg{err: fmt.Errorf("application not initialized")}
+		}
 
 		sid := ""
 		workDir := ""
@@ -2778,7 +2778,13 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 			sid = m.session.ID
 			workDir = m.sessionWorkDir()
 		}
-		response, err := m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb, m.permissionDecisionCh)
+		var response string
+		var err error
+		if m.mode == app.ModeOrchestrate {
+			response, err = m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, workDir, query, cb)
+		} else {
+			response, err = m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb, m.permissionDecisionCh)
+		}
 		if progressCh != nil {
 			close(progressCh)
 		}

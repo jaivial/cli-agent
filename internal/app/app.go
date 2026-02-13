@@ -1,15 +1,37 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"encoding/hex"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+)
+
+const (
+	defaultOrchestratePerTaskParallelism = 2
+	defaultOrchestrateMaxPanesPerTask   = 5
+	defaultOrchestrateMaxShards         = defaultOrchestratePerTaskParallelism * defaultOrchestrateMaxPanesPerTask
+	defaultOrchestrateMaxActivePanes    = 5
+	defaultOrchestrateCacheTTL          = 15 * time.Minute
+	defaultOrchestrateRetryCount        = 1
+	defaultOrchestrateContextHashWordsMax = 180
+)
+
+const (
+	orchestrateMaxPanesPerTaskEnv  = "EAI_ORCHESTRATE_MAX_PANES_PER_TASK"
+	orchestrateMaxShardsEnv        = "EAI_ORCHESTRATE_MAX_SHARDS"
+	orchestrateActivePanesEnv      = "EAI_ORCHESTRATE_ACTIVE_PANES"
 )
 
 type Application struct {
@@ -20,6 +42,15 @@ type Application struct {
 	Jobs     *JobStore
 	Prompter *PromptBuilder
 	Memory   *MemoryStore
+
+	orchestrateCache     map[string]orchestrateCacheEntry
+	orchestrateCacheMu   sync.RWMutex
+	orchestrateCacheTTL  time.Duration
+}
+
+type orchestrateCacheEntry struct {
+	Output    string
+	CreatedAt time.Time
 }
 
 func NewApplication(cfg Config, mockMode bool) (*Application, error) {
@@ -39,6 +70,12 @@ func NewApplication(cfg Config, mockMode bool) (*Application, error) {
 		return nil, err
 	}
 	jobRoot := filepath.Join(os.TempDir(), "cli-agent", "logs")
+	cacheTTL := defaultOrchestrateCacheTTL
+	if v := strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_CACHE_TTL_SEC")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			cacheTTL = time.Duration(parsed) * time.Second
+		}
+	}
 	return &Application{
 		Config:   cfg,
 		Logger:   logger,
@@ -47,6 +84,8 @@ func NewApplication(cfg Config, mockMode bool) (*Application, error) {
 		Jobs:     store,
 		Prompter: NewPromptBuilder(),
 		Memory:   NewMemoryStore(""),
+		orchestrateCache:   make(map[string]orchestrateCacheEntry),
+		orchestrateCacheTTL: cacheTTL,
 	}, nil
 }
 
@@ -142,6 +181,56 @@ func positiveIntEnv(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func normalizeOrchestrateIntEnv(name string, fallback int, minVal int, maxVal int) int {
+	value := positiveIntEnv(name, fallback)
+	if value < minVal {
+		value = minVal
+	}
+	if maxVal > 0 && value > maxVal {
+		value = maxVal
+	}
+	return value
+}
+
+func (a *Application) orchestrateTaskConcurrencyBudget(requested int) int {
+	if requested <= 0 {
+		requested = 1
+	}
+	if requested > defaultOrchestratePerTaskParallelism {
+		requested = defaultOrchestratePerTaskParallelism
+	}
+
+	maxPanesPerTask := normalizeOrchestrateIntEnv(orchestrateMaxPanesPerTaskEnv, defaultOrchestrateMaxPanesPerTask, 1, 50)
+	if maxPanesPerTask < 1 {
+		maxPanesPerTask = 1
+	}
+
+	shards := requested * maxPanesPerTask
+	hardCap := normalizeOrchestrateIntEnv(orchestrateMaxShardsEnv, defaultOrchestrateMaxShards, 1, 100)
+	if hardCap > 0 && shards > hardCap {
+		shards = hardCap
+	}
+
+	if a.Config.MaxParallelAgents > 0 && shards > a.Config.MaxParallelAgents {
+		shards = a.Config.MaxParallelAgents
+	}
+	if shards <= 0 {
+		shards = 1
+	}
+	return shards
+}
+
+func (a *Application) orchestrateActivePaneCap() int {
+	capValue := normalizeOrchestrateIntEnv(orchestrateActivePanesEnv, defaultOrchestrateMaxActivePanes, 1, 50)
+	if a.Config.MaxParallelAgents > 0 && capValue > a.Config.MaxParallelAgents {
+		capValue = a.Config.MaxParallelAgents
+	}
+	if capValue <= 0 {
+		return 1
+	}
+	return capValue
 }
 
 func sessionPromptSoftLimitChars() int {
@@ -808,6 +897,22 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 		return a.executePlanModeWithProgressEvents(ctx, input, progress)
 	}
 
+	// Orchestrate mode splits a task into independent subtasks and runs them
+	// as concurrent LLM calls. Keep this before general tool execution paths.
+	if mode == ModeOrchestrate {
+		if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
+			return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+		}
+		if progress != nil {
+			shards := a.orchestrateTaskConcurrencyBudget(2)
+			progress(ProgressEvent{
+				Kind: "thinking",
+				Text: fmt.Sprintf("Running task in orchestrated mode with up to %d parallel shards", shards),
+			})
+		}
+		return a.ExecuteOrchestrate(ctx, mode, input, 2)
+	}
+
 	// Text-only modes: if user asks to do something, prompt them to switch to create mode.
 	if !IsToolMode(mode) && mode != ModePlan && looksActionableForCreate(input) {
 		return "This looks like an action request. Switch to `create` mode (shift+tab) to create files / run commands, then send the same request again.", nil
@@ -1223,26 +1328,828 @@ func (a *Application) GenerateChatTitle(ctx context.Context, messages []StoredMe
 }
 
 func (a *Application) ExecuteOrchestrate(ctx context.Context, mode Mode, input string, agents int) (string, error) {
-	if agents <= 0 {
-		return "", errors.New("agents must be > 0")
+	return a.ExecuteOrchestrateWithProgressEvents(ctx, mode, input, agents, nil)
+}
+
+func (a *Application) ExecuteOrchestrateWithProgressEvents(
+	ctx context.Context,
+	mode Mode,
+	input string,
+	agents int,
+	progress func(ProgressEvent),
+) (string, error) {
+	if a == nil {
+		return "", errors.New("application is nil")
 	}
-	if agents > a.Config.MaxParallelAgents {
-		agents = a.Config.MaxParallelAgents
+	if a.Client == nil {
+		return "", errors.New("client is required")
+	}
+	if agents <= 0 {
+		agents = 1
 	}
 
+	splitStart := time.Now()
+	agents = a.orchestrateTaskConcurrencyBudget(agents)
+	tasks := splitTaskForOrchestration(input, agents)
+	if len(tasks) == 0 {
+		tasks = []string{input}
+	}
+	if len(tasks) < agents {
+		agents = len(tasks)
+	}
+	if agents == 0 {
+		agents = 1
+		tasks = []string{input}
+	}
+	orchestrateEmitProgress(progress, "orchestrate_split", fmt.Sprintf("split task into %d shard(s)", agents), time.Since(splitStart))
+
+	scheduleStart := time.Now()
 	shards := make([]TaskShard, 0, agents)
 	for i := 0; i < agents; i++ {
 		shards = append(shards, TaskShard{
-			ID:     fmt.Sprintf("%d", i+1),
-			Prompt: a.Prompter.Build(mode, fmt.Sprintf("Shard %d/%d: %s", i+1, agents, input)),
+			ID:      fmt.Sprintf("%d", i+1),
+			Index:   i,
+			Total:   agents,
+			Subtask: tasks[i],
+			Prompt:  a.Prompter.Build(mode, buildOrchestrateSubtaskPrompt(i+1, agents, tasks[i], input)),
 		})
 	}
-	orchestrator := NewOrchestrator(a.Client, a.Config.MaxParallelAgents)
-	results, err := orchestrator.Run(ctx, shards)
+	orchestrateEmitProgress(progress, "orchestrate_schedule", fmt.Sprintf("created %d shard prompt(s)", len(shards)), time.Since(scheduleStart))
+	orchestrateEmitProgress(progress, "orchestrate_llm", "starting shard calls", 0)
+
+	results := a.executeOrchestrateShardsWithRetries(ctx, mode, input, shards, progress)
+	if len(results) == 1 && results[0].Err != nil {
+		return "", results[0].Err
+	}
+
+	synthStart := time.Now()
+	out := SynthesizeResults(results)
+	orchestrateEmitProgress(progress, "orchestrate_synthesis", "synthesized shard outputs", time.Since(synthStart))
+	if strings.TrimSpace(out) == "" {
+		return "", errors.New("empty orchestrate output")
+	}
+	return out, nil
+}
+
+func orchestrateEmitProgress(progress func(ProgressEvent), kind, text string, duration time.Duration) {
+	if progress == nil {
+		return
+	}
+	progress(ProgressEvent{
+		Kind:       kind,
+		Text:       text,
+		DurationMs: duration.Milliseconds(),
+		At:         time.Now(),
+	})
+}
+
+type orchestrateShardAttempt struct {
+	Shard     TaskShard
+	Attempt   int
+	Output    string
+	Err       error
+	CacheHit  bool
+	Duration  time.Duration
+}
+
+func (a *Application) executeOrchestrateShardsWithRetries(ctx context.Context, mode Mode, fullTask string, shards []TaskShard, progress func(ProgressEvent)) []TaskResult {
+	if len(shards) == 0 {
+		return nil
+	}
+
+	results := make([]TaskResult, 0, len(shards))
+	for range shards {
+		results = append(results, TaskResult{ID: "", Index: -1})
+	}
+
+	finalized := make([]bool, len(shards))
+	retried := make([]bool, len(shards))
+	remaining := len(shards)
+	orchestrateCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type orchestrateShardWork struct {
+		Shard   TaskShard
+		Attempt int
+	}
+
+	maxAttempts := 1 + defaultOrchestrateRetryCount
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	resultBuffer := len(shards) * maxAttempts
+	if resultBuffer < 1 {
+		resultBuffer = 1
+	}
+	workBuffer := len(shards) * maxAttempts
+	if workBuffer < 1 {
+		workBuffer = 1
+	}
+	workCh := make(chan orchestrateShardWork, workBuffer)
+	resultCh := make(chan orchestrateShardAttempt, resultBuffer)
+
+	workers := a.orchestrateActivePaneCap()
+	if workers > len(shards) {
+		workers = len(shards)
+	}
+	if workers <= 0 {
+		workers = 1
+	}
+
+	var workerWG sync.WaitGroup
+	workerWG.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer workerWG.Done()
+			for work := range workCh {
+				orchestrateEmitProgress(progress, "orchestrate_tmux", fmt.Sprintf("started shard %s attempt %d", work.Shard.ID, work.Attempt), 0)
+				resultCh <- a.executeOrchestrateShard(orchestrateCtx, mode, fullTask, work.Shard, work.Attempt, progress)
+			}
+		}()
+	}
+
+	startShard := func(shard TaskShard, attempt int) {
+		workCh <- orchestrateShardWork{Shard: shard, Attempt: attempt}
+	}
+
+	for _, shard := range shards {
+		startShard(shard, 1)
+	}
+
+	retryAllowed := defaultOrchestrateRetryCount > 0
+	for remaining > 0 {
+		res := <-resultCh
+		idx := res.Shard.Index
+		if idx < 0 || idx >= len(shards) {
+			continue
+		}
+		if finalized[idx] {
+			continue
+		}
+
+		if progress != nil {
+			t := fmt.Sprintf("shard %s attempt %d completed in %dms", res.Shard.ID, res.Attempt, res.Duration.Milliseconds())
+			if res.CacheHit {
+				t = fmt.Sprintf("shard %s attempt %d cache hit (%dms)", res.Shard.ID, res.Attempt, res.Duration.Milliseconds())
+			}
+			orchestrateEmitProgress(progress, "orchestrate_llm", t, res.Duration)
+		}
+
+		if res.Err != nil && !retried[idx] && retryAllowed {
+			if ctx.Err() == nil {
+				retried[idx] = true
+				orchestrateEmitProgress(progress, "orchestrate_retry", fmt.Sprintf("retrying failed shard %s with constrained prompt", res.Shard.ID), 0)
+				startShard(TaskShard{ID: res.Shard.ID, Index: idx, Total: res.Shard.Total, Subtask: res.Shard.Subtask, Prompt: res.Shard.Prompt}, res.Attempt+1)
+				orchestrateEmitProgress(progress, "orchestrate_shard_done", fmt.Sprintf("shard %s attempt %d finished with error; retry queued", res.Shard.ID, res.Attempt), 0)
+				continue
+			}
+		}
+		status := "failed"
+		if res.Err == nil {
+			status = "succeeded"
+		}
+		orchestrateEmitProgress(progress, "orchestrate_shard_done", fmt.Sprintf("shard %s attempt %d %s", res.Shard.ID, res.Attempt, status), res.Duration)
+
+		results[idx] = TaskResult{
+			ID:     res.Shard.ID,
+			Index:  idx,
+			Output: res.Output,
+			Err:    res.Err,
+		}
+		finalized[idx] = true
+		remaining--
+		if res.Err == nil {
+			if progress != nil {
+				orchestrateEmitProgress(progress, "orchestrate_cache", fmt.Sprintf("shard %s ready", res.Shard.ID), 0)
+			}
+		}
+	}
+
+	close(workCh)
+	workerWG.Wait()
+
+	orchestrateEmitProgress(progress, "orchestrate_sync", fmt.Sprintf("all %d shard(s) finished", len(shards)), 0)
+
+	return results
+}
+
+const orchestrateTmuxWorkerPollInterval = 70 * time.Millisecond
+
+type orchestrateWorkerResult struct {
+	ShardID   string `json:"shard_id"`
+	Attempt   int    `json:"attempt"`
+	Output    string `json:"output"`
+	Error     string `json:"error"`
+	CacheHit  bool   `json:"cache_hit"`
+	DurationMs int64 `json:"duration_ms"`
+}
+
+func (a *Application) orchestrateWorkerBinaryPath() (string, error) {
+	if override := strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_WORKER_BIN")); override != "" {
+		return override, nil
+	}
+	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	return SynthesizeResults(results), nil
+	return exe, nil
+}
+
+func (a *Application) canRunOrchestrateShardsInTmux() bool {
+	if a == nil {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("EAI_TMUX_WORKER")) == "1" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("EAI_TMUX_DISABLE")) == "1" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("TMUX")) == "" {
+		return false
+	}
+	_, err := exec.LookPath("tmux")
+	return err == nil
+}
+
+func (a *Application) readOrchestrateWorkerResult(ctx context.Context, resultPath string) (orchestrateWorkerResult, error) {
+	var result orchestrateWorkerResult
+	ticker := time.NewTicker(orchestrateTmuxWorkerPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-ticker.C:
+			payload, err := os.ReadFile(resultPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return result, err
+			}
+			if len(payload) == 0 {
+				continue
+			}
+
+			if err := json.Unmarshal(payload, &result); err != nil {
+				continue
+			}
+			return result, nil
+		}
+	}
+}
+
+func (a *Application) killTmuxPane(pane string) {
+	pane = strings.TrimSpace(pane)
+	if pane == "" {
+		return
+	}
+	_ = exec.Command("tmux", "kill-pane", "-t", pane).Run()
+}
+
+func (a *Application) executeOrchestrateShardInTmux(ctx context.Context, prompt string, shard TaskShard, attempt int) (string, error) {
+	resultPath, err := os.CreateTemp("", "eai-orchestrate-shard-*.json")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(resultPath.Name())
+
+	binary, err := a.orchestrateWorkerBinaryPath()
+	if err != nil {
+		return "", err
+	}
+
+	tmuxArgs := []string{"split-window", "-d", "-P", "-F", "#{pane_id}"}
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		tmuxArgs = append(tmuxArgs, "-t", pane)
+	}
+	tmuxArgs = append(tmuxArgs,
+		binary,
+		"orchestrate-worker",
+		"--shard-id", shard.ID,
+		"--attempt", strconv.Itoa(attempt),
+		"--prompt", prompt,
+		"--result-file", resultPath.Name(),
+	)
+
+	tmuxCmd := exec.CommandContext(ctx, "tmux", tmuxArgs...)
+	tmuxCmd.Env = append(os.Environ(), "EAI_TMUX_WORKER=1")
+	output, err := tmuxCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("tmux split-window failed: %w", err)
+	}
+	parts := strings.Fields(strings.TrimSpace(string(output)))
+	if len(parts) == 0 {
+		return "", fmt.Errorf("tmux split-window did not return pane id")
+	}
+	paneID := parts[0]
+	defer a.killTmuxPane(paneID)
+
+	workerRes, err := a.readOrchestrateWorkerResult(ctx, resultPath.Name())
+	if err != nil {
+		return "", err
+	}
+	_ = os.Remove(resultPath.Name())
+
+	if workerRes.Error != "" {
+		return "", errors.New(workerRes.Error)
+	}
+	return workerRes.Output, nil
+}
+
+func (a *Application) completeOrchestrateShard(ctx context.Context, prompt string, shard TaskShard, attempt int) (string, error) {
+	if a.canRunOrchestrateShardsInTmux() {
+		return a.executeOrchestrateShardInTmux(ctx, prompt, shard, attempt)
+	}
+	return a.Client.Complete(ctx, prompt)
+}
+
+func (a *Application) executeOrchestrateShard(ctx context.Context, mode Mode, fullTask string, shard TaskShard, attempt int, progress func(ProgressEvent)) orchestrateShardAttempt {
+	prompt := shard.Prompt
+	if attempt > 1 {
+		prompt = buildOrchestrateSubtaskRetryPrompt(shard.Subtask, fullTask, attempt)
+	}
+	cacheKey := a.orchestrateCacheKey(mode, fullTask, shard.Subtask, prompt)
+	if cached, ok := a.getOrchestrateCache(cacheKey); ok {
+		return orchestrateShardAttempt{
+			Shard:    shard,
+			Attempt:  attempt,
+			Output:   cached,
+			CacheHit: true,
+		}
+	}
+	start := time.Now()
+	out, err := a.completeOrchestrateShard(ctx, prompt, shard, attempt)
+	duration := time.Since(start)
+	if err == nil {
+		a.setOrchestrateCache(cacheKey, out)
+	}
+	return orchestrateShardAttempt{
+		Shard:    shard,
+		Attempt:  attempt,
+		Output:   out,
+		Err:      err,
+		Duration: duration,
+	}
+}
+
+func (a *Application) orchestrateCacheEnabled() bool {
+	if a == nil {
+		return false
+	}
+	return a.orchestrateCacheTTL > 0
+}
+
+func (a *Application) orchestrateCacheKey(mode Mode, fullTask, subtask, prompt string) string {
+	normalized := []string{
+		strings.ToLower(strings.TrimSpace(subtask)),
+		normalizeOrchestrateContextForCache(fullTask),
+		normalizeOrchestrateContextForCache(prompt),
+		string(mode),
+		strings.TrimSpace(a.Config.Model),
+	}
+	sum := sha256.Sum256([]byte(strings.Join(normalized, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func (a *Application) getOrchestrateCache(key string) (string, bool) {
+	if !a.orchestrateCacheEnabled() {
+		return "", false
+	}
+	if a.orchestrateCache == nil {
+		a.orchestrateCacheMu.Lock()
+		if a.orchestrateCache == nil {
+			a.orchestrateCache = make(map[string]orchestrateCacheEntry)
+		}
+		a.orchestrateCacheMu.Unlock()
+	}
+
+	a.orchestrateCacheMu.RLock()
+	entry, ok := a.orchestrateCache[key]
+	a.orchestrateCacheMu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	if a.orchestrateCacheTTL > 0 && time.Since(entry.CreatedAt) > a.orchestrateCacheTTL {
+		a.orchestrateCacheMu.Lock()
+		delete(a.orchestrateCache, key)
+		a.orchestrateCacheMu.Unlock()
+		return "", false
+	}
+	return entry.Output, true
+}
+
+func (a *Application) setOrchestrateCache(key string, value string) {
+	if !a.orchestrateCacheEnabled() {
+		return
+	}
+	if a.orchestrateCache == nil {
+		a.orchestrateCacheMu.Lock()
+		if a.orchestrateCache == nil {
+			a.orchestrateCache = make(map[string]orchestrateCacheEntry)
+		}
+		a.orchestrateCacheMu.Unlock()
+	}
+	a.orchestrateCacheMu.Lock()
+	a.orchestrateCache[key] = orchestrateCacheEntry{
+		Output:    value,
+		CreatedAt: time.Now(),
+	}
+	a.orchestrateCacheMu.Unlock()
+}
+
+func splitTaskForOrchestration(input string, maxShards int) []string {
+	task := strings.TrimSpace(input)
+	if task == "" {
+		return []string{""}
+	}
+	if maxShards <= 1 {
+		return []string{task}
+	}
+	if maxShards > defaultOrchestrateMaxShards {
+		maxShards = defaultOrchestrateMaxShards
+	}
+
+	if shards := normalizeOrchestrateShards(splitTaskByLines(task), maxShards); len(shards) >= 2 {
+		return shards
+	}
+	if shards := normalizeOrchestrateShards(splitTaskByConnectors(task), maxShards); len(shards) >= 2 {
+		return shards
+	}
+	return []string{task}
+}
+
+func splitTaskByLines(task string) []string {
+	lines := strings.Split(task, "\n")
+	subtasks := make([]string, 0, len(lines))
+	var current string
+
+	appendCurrent := func() {
+		if strings.TrimSpace(current) == "" {
+			return
+		}
+		subtasks = append(subtasks, strings.TrimSpace(current))
+		current = ""
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		prefixTrimmed := trimmedOrchestrateListMarker(line)
+		if prefixTrimmed != "" {
+			appendCurrent()
+			current = prefixTrimmed
+			continue
+		}
+
+		if current != "" && isOrchestrateListContinuation(line) {
+			current = strings.TrimSpace(current + " " + trimmed)
+			continue
+		}
+	}
+
+	appendCurrent()
+	return subtasks
+}
+
+func isOrchestrateListContinuation(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if trimmedOrchestrateListMarker(line) != "" {
+		return false
+	}
+	if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+		return true
+	}
+	return hasOrchestrateContinuationPrefix(trimmed)
+}
+
+func splitTaskByConnectors(task string) []string {
+	best := struct {
+		left  string
+		right string
+		ok    bool
+	}{}
+	if strings.TrimSpace(task) == "" {
+		return nil
+	}
+
+	low := strings.ToLower(task)
+	separators := []string{" and then ", ", then ", ";", " then ", " plus ", "\n"}
+
+	for _, sep := range separators {
+		start := 0
+		for {
+			idx := strings.Index(low[start:], sep)
+			if idx < 0 {
+				break
+			}
+			idx += start
+			rawLeft := strings.TrimSpace(task[:idx])
+			rawRight := strings.TrimSpace(task[idx+len(sep):])
+
+			if strings.EqualFold(sep, ";") || strings.EqualFold(sep, "\n") {
+				rawLeft = strings.TrimSuffix(rawLeft, ",")
+			}
+
+			if !isLikelyTopLevelOrchestrateSeparator(task, rawLeft, rawRight, idx, len(sep)) {
+				start = idx + len(sep)
+				continue
+			}
+			if countOrchestrateWords(rawLeft) < 2 || countOrchestrateWords(rawRight) < 2 {
+				start = idx + len(sep)
+				continue
+			}
+
+			leftLen := len(rawLeft)
+			rightLen := len(rawRight)
+			if !best.ok || absInt(leftLen-rightLen) < absInt(len(best.left)-len(best.right)) {
+				best = struct {
+					left  string
+					right string
+					ok    bool
+				}{left: rawLeft, right: rawRight, ok: true}
+			}
+
+			start = idx + len(sep)
+		}
+	}
+
+	if best.ok {
+		return []string{best.left, best.right}
+	}
+	return nil
+}
+
+func normalizeOrchestrateShards(subtasks []string, max int) []string {
+	if max <= 0 {
+		max = 1
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, max)
+	for _, subtask := range subtasks {
+		clean := strings.TrimSpace(subtask)
+		if clean == "" {
+			continue
+		}
+		key := strings.ToLower(clean)
+		if seen[key] {
+			continue
+		}
+		if countOrchestrateWords(clean) < 2 {
+			continue
+		}
+		seen[key] = true
+		out = append(out, clean)
+		if len(out) >= max {
+			break
+		}
+	}
+	if len(out) < 2 {
+		return out
+	}
+	return out
+}
+
+func countOrchestrateWords(text string) int {
+	return len(strings.Fields(text))
+}
+
+func trimmedOrchestrateListMarker(line string) string {
+	line = strings.TrimSpace(line)
+	matches := orchestrateListMarkerRE.FindStringSubmatch(line)
+	if len(matches) == 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	return ""
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func normalizeOrchestrateContextForCache(input string) string {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) > defaultOrchestrateContextHashWordsMax {
+		fields = fields[:defaultOrchestrateContextHashWordsMax]
+	}
+	return strings.ToLower(strings.Join(fields, " "))
+}
+
+func isLikelyTopLevelOrchestrateSeparator(task, left, right string, index, sepLen int) bool {
+	if sepLen <= 0 {
+		return false
+	}
+	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
+		return false
+	}
+	if countOrchestrateWords(left) < 2 || countOrchestrateWords(right) < 2 {
+		return false
+	}
+	if hasOpenOrchestrateDelimiters(task[:index]) || hasOpenOrchestrateDelimiters(task[index+sepLen:]) {
+		return false
+	}
+	if hasUnclosedQuote(task[:index]) || hasUnclosedQuote(task[index+sepLen:]) {
+		return false
+	}
+	leftTrimmed := strings.TrimSpace(left)
+	rightTrimmed := strings.TrimSpace(right)
+	if hasOrchestrateContinuationPrefix(leftTrimmed) || hasOrchestrateContinuationPrefix(rightTrimmed) {
+		return false
+	}
+	if hasOrchestrateDependencyStart(leftTrimmed) || hasOrchestrateDependencyStart(rightTrimmed) {
+		return false
+	}
+	if isAnaphoricOrchestrateBoundary(leftTrimmed) || isAnaphoricOrchestrateBoundary(rightTrimmed) {
+		return false
+	}
+	if strings.HasSuffix(leftTrimmed, ",") || strings.HasSuffix(leftTrimmed, ";") || strings.HasSuffix(leftTrimmed, " and") || strings.HasSuffix(leftTrimmed, " or") {
+		return false
+	}
+	return true
+}
+
+func hasOrchestrateDependencyStart(input string) bool {
+	input = strings.ToLower(strings.TrimSpace(input))
+	for _, prefix := range []string{
+		"if ",
+		"when ",
+		"unless ",
+		"until ",
+		"while ",
+		"before ",
+		"after ",
+		"since ",
+		"because ",
+		"in case ",
+		"despite ",
+		"although ",
+		"as soon as ",
+		"as long as ",
+		"once ",
+		"provided ",
+		"except ",
+	} {
+		if strings.HasPrefix(input, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAnaphoricOrchestrateBoundary(input string) bool {
+	input = strings.ToLower(strings.TrimSpace(input))
+	for _, prefix := range []string{
+		"it ",
+		"it's ",
+		"its ",
+		"this ",
+		"that ",
+		"these ",
+		"those ",
+		"them ",
+		"their ",
+		"there ",
+		"then ",
+	} {
+		if strings.HasPrefix(input, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOrchestrateContinuationPrefix(input string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(input))
+	if trimmed == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"and then ",
+		"after ",
+		"after that ",
+		"as long as ",
+		"as soon as ",
+		"before ",
+		"because ",
+		"despite ",
+		"even if ",
+		"even though ",
+		"if ",
+		"in case ",
+		"in order to ",
+		"once ",
+		"since ",
+		"so ",
+		"though ",
+		"unless ",
+		"until ",
+		"when ",
+		"while ",
+	} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOpenOrchestrateDelimiters(s string) bool {
+	parenDepth := 0
+	bracketDepth := 0
+	braceDepth := 0
+	for _, ch := range s {
+		switch ch {
+		case '(':
+			parenDepth++
+		case ')':
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case '[':
+			bracketDepth++
+		case ']':
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+	}
+	return parenDepth > 0 || bracketDepth > 0 || braceDepth > 0
+}
+
+func hasUnclosedQuote(s string) bool {
+	inSingle := false
+	inDouble := false
+	var prev rune
+	for _, ch := range s {
+		switch ch {
+		case '\'':
+			if !inDouble && prev != '\\' {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle && prev != '\\' {
+				inDouble = !inDouble
+			}
+		}
+		prev = ch
+	}
+	return inSingle || inDouble
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func buildOrchestrateSubtaskRetryPrompt(subtask, fullTask string, attempt int) string {
+	if strings.TrimSpace(subtask) == "" {
+		subtask = "continue the requested task"
+	}
+	fullTask = strings.TrimSpace(fullTask)
+	if attempt <= 1 {
+		return buildOrchestrateSubtaskPrompt(1, 1, subtask, fullTask)
+	}
+	return fmt.Sprintf("Retry only the failed subtask. Return only the concrete output for this item.\n\nSubtask:\n%s", subtask)
+}
+
+var orchestrateListMarkerRE = regexp.MustCompile(`(?i)^\s*(?:(?:[-*+•]\s*(?:\[[ xX]\]\s*)?|\d+\s*[\.)]|\d+\s*[-–—]\s+|\([a-zA-Z0-9]{1,4}\)|[a-zA-Z][.)]|[a-zA-Z]\)|\b(?:step|paso)\s+\d+[:\.\)])\s+(.*)$`)
+
+func buildOrchestrateSubtaskPrompt(index, total int, subtask, fullTask string) string {
+	fullTask = strings.TrimSpace(fullTask)
+	subtask = strings.TrimSpace(subtask)
+	if total <= 1 {
+		return subtask
+	}
+	return fmt.Sprintf("Subtask %d/%d:\n%s\n\nOriginal request:\n%s", index, total, subtask, fullTask)
 }
 
 func (a *Application) RunCommand(ctx context.Context, command string, background bool) (Job, int, error) {

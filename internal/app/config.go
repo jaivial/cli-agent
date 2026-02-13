@@ -95,7 +95,7 @@ func DefaultConfig() Config {
 		Model:             DefaultModel,
 		MaxTokens:         32768,
 		MaxParallelAgents: 50,
-		DefaultMode:       "do",
+		DefaultMode:       "orchestrate",
 		SafeMode:          true,
 		Installed:         false,
 
@@ -152,7 +152,7 @@ func LoadConfig(path string) (Config, error) {
 		cfg.MaxParallelAgents = 900
 	}
 	if cfg.DefaultMode == "" {
-		cfg.DefaultMode = "do"
+		cfg.DefaultMode = "orchestrate"
 	}
 	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	return cfg, nil

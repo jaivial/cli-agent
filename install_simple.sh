@@ -132,7 +132,54 @@ check_prerequisites() {
         log_error "Cannot write to ${INSTALL_DIR}"
         exit 1
     fi
+    install_tmux_if_missing
     log_success "Prerequisites passed"
+}
+
+install_tmux_if_missing() {
+    if command -v tmux &> /dev/null; then
+        return
+    fi
+
+    log_info "tmux not found; attempting silent install..."
+    if command -v apt-get &> /dev/null; then
+        if [[ "${EUID}" -eq 0 ]]; then
+            if ! apt-get update -y > /dev/null || ! apt-get install -y tmux > /dev/null; then
+                log_warn "tmux install via apt-get failed"
+            fi
+        elif command -v sudo &> /dev/null; then
+            if ! sudo apt-get update -y > /dev/null || ! sudo apt-get install -y tmux > /dev/null; then
+                log_warn "tmux install via sudo apt-get failed"
+            fi
+        else
+            log_warn "tmux is required for pane orchestration; install it manually (apt-get or sudo unavailable)"
+        fi
+        return
+    fi
+
+    if command -v dnf &> /dev/null; then
+        if [[ "${EUID}" -eq 0 ]]; then
+            if ! dnf install -y tmux > /dev/null; then
+                log_warn "tmux install via dnf failed"
+            fi
+        elif command -v sudo &> /dev/null; then
+            if ! sudo dnf install -y tmux > /dev/null; then
+                log_warn "tmux install via sudo dnf failed"
+            fi
+        else
+            log_warn "tmux is required for pane orchestration; install it manually (dnf or sudo unavailable)"
+        fi
+        return
+    fi
+
+    if command -v brew &> /dev/null; then
+        if ! brew install tmux > /dev/null; then
+            log_warn "tmux install via brew failed"
+        fi
+        return
+    fi
+
+    log_warn "tmux missing and could not be auto-installed. Install tmux manually to enable pane orchestration."
 }
 
 download_binary() {
@@ -203,7 +250,7 @@ base_url: "https://api.z.ai/api/paas/v4/chat/completions"
 model: "glm-4.7"
 max_tokens: 4096
 max_parallel_agents: 50
-default_mode: "plan"
+default_mode: "orchestrate"
 safe_mode: true
 installed: false
 EOF

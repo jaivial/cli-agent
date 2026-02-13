@@ -4,16 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 )
 
 type TaskShard struct {
 	ID     string
+	Index  int
+	Total  int
+	Subtask string
 	Prompt string
 }
 
 type TaskResult struct {
 	ID     string
+	Index  int
 	Output string
 	Err    error
 }
@@ -52,7 +57,12 @@ func (o *Orchestrator) Run(ctx context.Context, shards []TaskShard) ([]TaskResul
 		defer wg.Done()
 		for shard := range jobs {
 			output, err := o.Client.Complete(ctx, shard.Prompt)
-			results <- TaskResult{ID: shard.ID, Output: output, Err: err}
+			results <- TaskResult{
+				ID:     shard.ID,
+				Index:  shard.Index,
+				Output: output,
+				Err:    err,
+			}
 		}
 	}
 
@@ -84,8 +94,17 @@ func SynthesizeResults(results []TaskResult) string {
 	if len(results) == 0 {
 		return ""
 	}
+	ordered := make([]TaskResult, len(results))
+	copy(ordered, results)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Index == ordered[j].Index {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return ordered[i].Index < ordered[j].Index
+	})
+
 	builder := ""
-	for _, result := range results {
+	for _, result := range ordered {
 		if result.Err != nil {
 			builder += fmt.Sprintf("[Shard %s Error] %v\n", result.ID, result.Err)
 			continue

@@ -202,8 +202,8 @@ install_dependencies() {
     fi
 
     require_cmd dnf
-    log_info "Installing dependencies with dnf (git, golang, curl)..."
-    run_as_root dnf -y install git golang curl
+    log_info "Installing dependencies with dnf (git, golang, curl, tmux)..."
+    run_as_root dnf -y install git golang curl tmux
 }
 
 check_go_version() {

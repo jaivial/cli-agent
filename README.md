@@ -12,6 +12,8 @@ Un agente CLI moderno con interfaz TUI mejorado, potenciado por Z.AI.
 
 ## 🚀 Instalación Rápida
 
+El instalador configura/instala `tmux` de forma silenciosa para orquestación en multipane.
+
 ### Opción 1: Instalador automático (recomendado)
 
 ```bash
@@ -67,6 +69,12 @@ Instalación global en `/usr/local/bin`:
 eai
 ```
 
+Si no estás dentro de tmux y quieres forzar apertura explícita en tmux, el comando lo hará automáticamente. Para forzar ejecución sin tmux:
+
+```bash
+EAI_NO_TMUX=1 eai
+```
+
 ### Ejecutar una tarea directamente
 
 ```bash
@@ -77,13 +85,13 @@ eai agent --mode code "Write a Python function to sort a list"
 
 ### Modos disponibles
 
-- `ask` - Mode preguntes simples
-- `plan` - Planificar y estructurar (por defecto)
+- `ask` - Modo de preguntas simples
+- `plan` - Planificar y estructurar
 - `do` - Ejecución directa
 - `code` - Generación de código
 - `debug` - Depuración
 - `architect` - Diseño de arquitectura
-- `orchestrate` - Orquestación de tareas
+- `orchestrate` - Orquestación de tareas (por defecto)
 
 ```bash
 eai --mode code "Create a REST API with Go"
@@ -120,9 +128,19 @@ Crea `~/.config/cli-agent/config.yml`:
 api_key: "tu-api-key"
 base_url: "https://api.z.ai/api/paas/v4/chat/completions"
 model: "glm-4.7"
-default_mode: "plan"
+default_mode: "orchestrate"
 max_tokens: 4096
 ```
+
+### Orquestación en tmux (multiagente)
+
+Variables de entorno para paralelo de orquestación:
+
+- `EAI_ORCHESTRATE_MAX_PANES_PER_TASK` (por defecto: `5`)
+- `EAI_ORCHESTRATE_MAX_SHARDS` (por defecto: `10`)
+- `EAI_ORCHESTRATE_ACTIVE_PANES` (por defecto: `5`)
+
+Con estos valores, el modo `orchestrate` puede crear hasta `2 x 5 = 10` shards iniciales y mantener `EAI_ORCHESTRATE_ACTIVE_PANES` panes activos de forma concurrente.
 
 ## ⌨️ Atajos de teclado
 
