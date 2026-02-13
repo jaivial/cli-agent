@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,6 +310,183 @@ func TestExecuteTool_ExecTimeout(t *testing.T) {
 	// Should report failure
 	if result.Success {
 		t.Error("Expected timeout to cause failure")
+	}
+}
+
+func TestExecuteTool_ExecDetachedProcessReturnsPromptly(t *testing.T) {
+	l := createTestAgentLoop()
+
+	call := ToolCall{
+		ID:   "exec_detached",
+		Name: "exec",
+		Arguments: mustMarshalJSON(map[string]interface{}{
+			"command": "sleep 3 & echo detached-ready",
+			"timeout": 15,
+		}),
+	}
+
+	start := time.Now()
+	result := l.executeTool(createTestContext(), call)
+	duration := time.Since(start)
+
+	if !result.Success {
+		t.Fatalf("expected detached command to succeed, got error: %s", result.Error)
+	}
+	if !strings.Contains(result.Output, "detached-ready") {
+		t.Fatalf("expected detached command output, got: %q", result.Output)
+	}
+	if duration > 2*time.Second {
+		t.Fatalf("detached background command returned too slowly: %s", duration)
+	}
+}
+
+func TestVerifyPythonHTTPBackgroundLaunch_PortInUseDifferentContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte("<html><head><title>Wanted App</title></head><body>ok</body></html>"), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "<html><head><title>Other App</title></head><body>other</body></html>")
+		}),
+	}
+	defer srv.Shutdown(context.Background())
+	go func() { _ = srv.Serve(ln) }()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	command := fmt.Sprintf("cd %s && nohup python3 -m http.server %d > /dev/null 2>&1 & echo $!", tmpDir, port)
+	fakeDeadPID := os.Getpid() + 500000
+	for isProcessAlive(fakeDeadPID) {
+		fakeDeadPID++
+	}
+
+	note, verifyErr := verifyPythonHTTPBackgroundLaunch(command, tmpDir, []byte(fmt.Sprintf("%d\n", fakeDeadPID)))
+	if verifyErr == nil {
+		t.Fatalf("expected verification error, got note=%q", note)
+	}
+	if !strings.Contains(strings.ToLower(verifyErr.Error()), "different content") {
+		t.Fatalf("expected content mismatch error, got: %v", verifyErr)
+	}
+}
+
+func TestVerifyPythonHTTPBackgroundLaunch_PortInUseMatchingContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte("<html><head><title>Wanted App</title></head><body>ok</body></html>"), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "<html><head><title>Wanted App</title></head><body>served</body></html>")
+		}),
+	}
+	defer srv.Shutdown(context.Background())
+	go func() { _ = srv.Serve(ln) }()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	command := fmt.Sprintf("cd %s && nohup python3 -m http.server %d > /dev/null 2>&1 & echo $!", tmpDir, port)
+	fakeDeadPID := os.Getpid() + 800000
+	for isProcessAlive(fakeDeadPID) {
+		fakeDeadPID++
+	}
+
+	note, verifyErr := verifyPythonHTTPBackgroundLaunch(command, tmpDir, []byte(fmt.Sprintf("%d\n", fakeDeadPID)))
+	if verifyErr != nil {
+		t.Fatalf("expected verification success, got error: %v", verifyErr)
+	}
+	if !strings.Contains(note, "already serving expected project content") {
+		t.Fatalf("expected reuse note, got: %q", note)
+	}
+}
+
+func TestParsePythonHTTPServerPort(t *testing.T) {
+	tests := []struct {
+		name       string
+		command    string
+		wantPort   int
+		wantParsed bool
+	}{
+		{
+			name:       "Explicit port",
+			command:    "nohup python3 -m http.server 3003 > /dev/null 2>&1 &",
+			wantPort:   3003,
+			wantParsed: true,
+		},
+		{
+			name:       "Default port with redirection",
+			command:    "nohup python3 -m http.server >/dev/null 2>&1 &",
+			wantPort:   8000,
+			wantParsed: true,
+		},
+		{
+			name:       "Non-http-server command",
+			command:    "npm run dev",
+			wantPort:   0,
+			wantParsed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPort, gotParsed := parsePythonHTTPServerPort(tt.command)
+			if gotParsed != tt.wantParsed {
+				t.Fatalf("parsePythonHTTPServerPort(%q) parsed=%v, want %v", tt.command, gotParsed, tt.wantParsed)
+			}
+			if gotPort != tt.wantPort {
+				t.Fatalf("parsePythonHTTPServerPort(%q) port=%d, want %d", tt.command, gotPort, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestShouldAutoDetachServerCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		expected bool
+	}{
+		{
+			name:     "npm dev foreground",
+			command:  "npm run dev",
+			expected: true,
+		},
+		{
+			name:     "python http server foreground",
+			command:  "python3 -m http.server 3000",
+			expected: true,
+		},
+		{
+			name:     "already backgrounded",
+			command:  "npm run dev > /tmp/dev.log 2>&1 &",
+			expected: false,
+		},
+		{
+			name:     "non-server command",
+			command:  "npm run test",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldAutoDetachServerCommand(tt.command)
+			if got != tt.expected {
+				t.Fatalf("shouldAutoDetachServerCommand(%q)=%v, want %v", tt.command, got, tt.expected)
+			}
+		})
 	}
 }
 

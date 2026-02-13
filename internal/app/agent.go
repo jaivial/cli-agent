@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +28,32 @@ var retryableErrors = []string{
 	"text file busy",
 	"no such process",
 }
+
+var (
+	indexTitleRe = regexp.MustCompile(`(?is)<title[^>]*>\s*([^<]{3,120})\s*</title>`)
+	indexScriptRe = regexp.MustCompile(`(?is)<script[^>]*\ssrc=["']([^"']+)["']`)
+	indexTokenRe = regexp.MustCompile(`[A-Za-z0-9._/\-]{10,}`)
+	localServerURLRe = regexp.MustCompile(`https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d{2,5})?`)
+	autoDetachServerPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bnpm\s+run\s+dev\b`),
+		regexp.MustCompile(`(?i)\bnpm\s+(run\s+)?start\b`),
+		regexp.MustCompile(`(?i)\bpnpm\s+(run\s+)?dev\b`),
+		regexp.MustCompile(`(?i)\bpnpm\s+(run\s+)?start\b`),
+		regexp.MustCompile(`(?i)\byarn\s+dev\b`),
+		regexp.MustCompile(`(?i)\byarn\s+start\b`),
+		regexp.MustCompile(`(?i)\b(?:npx\s+)?vite(?:\s|$)`),
+		regexp.MustCompile(`(?i)\bnext\s+dev\b`),
+		regexp.MustCompile(`(?i)\bnuxt\s+dev\b`),
+		regexp.MustCompile(`(?i)\bastro\s+dev\b`),
+		regexp.MustCompile(`(?i)\breact-scripts\s+start\b`),
+		regexp.MustCompile(`(?i)\bpython(?:3)?\s+-m\s+http\.server\b`),
+		regexp.MustCompile(`(?i)\buvicorn\b`),
+		regexp.MustCompile(`(?i)\bflask\s+run\b`),
+		regexp.MustCompile(`(?i)\bmanage\.py\s+runserver\b`),
+		regexp.MustCompile(`(?i)\brails\s+server\b`),
+		regexp.MustCompile(`(?i)\bphp\s+-s\s+`),
+	}
+)
 
 // isRetryable checks if an error is transient and can be retried
 func isRetryable(err string) bool {
@@ -1589,7 +1618,7 @@ func runShellCommand(ctx context.Context, shell string, shellArgs []string, dir 
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
 	}
-	return cmd.CombinedOutput()
+	return runCommandWithCapturedOutput(cmd)
 }
 
 func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []string, dir string) (output []byte, err error, attempted bool) {
@@ -1604,8 +1633,502 @@ func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []stri
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
 	}
-	out, runErr := cmd.CombinedOutput()
+	out, runErr := runCommandWithCapturedOutput(cmd)
 	return out, runErr, true
+}
+
+func runCommandWithCapturedOutput(cmd *exec.Cmd) ([]byte, error) {
+	tmp, err := os.CreateTemp("", "cli-agent-exec-output-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	// Avoid CombinedOutput pipe inheritance hangs when child processes detach.
+	cmd.Stdout = tmp
+	cmd.Stderr = tmp
+
+	runErr := cmd.Run()
+	if _, seekErr := tmp.Seek(0, io.SeekStart); seekErr != nil {
+		if runErr != nil {
+			return nil, runErr
+		}
+		return nil, seekErr
+	}
+	output, readErr := io.ReadAll(tmp)
+	if readErr != nil {
+		if runErr != nil {
+			return output, runErr
+		}
+		return output, readErr
+	}
+	return output, runErr
+}
+
+func shouldAutoDetachServerCommand(command string) bool {
+	if strings.TrimSpace(command) == "" {
+		return false
+	}
+	if hasShellBackgroundOperator(command) {
+		return false
+	}
+
+	for _, pattern := range autoDetachServerPatterns {
+		if pattern.MatchString(command) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellSingleQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func buildDetachedServerCommand(command string) (wrapped string, logPath string, err error) {
+	f, err := os.CreateTemp("", "cli-agent-server-*.log")
+	if err != nil {
+		return "", "", err
+	}
+	logPath = f.Name()
+	if closeErr := f.Close(); closeErr != nil {
+		return "", "", closeErr
+	}
+
+	wrapped = fmt.Sprintf("(%s) > %s 2>&1 < /dev/null & echo $!", command, shellSingleQuote(logPath))
+	return wrapped, logPath, nil
+}
+
+func verifyDetachedServerLaunch(ctx context.Context, pid int, hasPID bool, logPath string) (string, error) {
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+
+		logText := readTextFileAtMost(logPath, 64*1024)
+		if fail := detectServerStartFailure(logText); fail != "" {
+			return "", fmt.Errorf("server startup failed: %s", fail)
+		}
+		if hasPID && !isProcessAlive(pid) {
+			if summary := summarizeLogSnippet(logText, 8); summary != "" {
+				return "", fmt.Errorf("background server process %d exited quickly; log: %s", pid, summary)
+			}
+			return "", fmt.Errorf("background server process %d exited quickly", pid)
+		}
+
+		if url := extractLocalServerURL(logText); url != "" {
+			if hasPID {
+				return fmt.Sprintf("Started background server (PID %d) at %s. Log: %s", pid, url, logPath), nil
+			}
+			return fmt.Sprintf("Started background server at %s. Log: %s", url, logPath), nil
+		}
+		if looksLikeServerReadyLog(logText) {
+			if hasPID {
+				return fmt.Sprintf("Started background server (PID %d). Log: %s", pid, logPath), nil
+			}
+			return fmt.Sprintf("Started background server. Log: %s", logPath), nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	logText := readTextFileAtMost(logPath, 64*1024)
+	if fail := detectServerStartFailure(logText); fail != "" {
+		return "", fmt.Errorf("server startup failed: %s", fail)
+	}
+	if hasPID && !isProcessAlive(pid) {
+		if summary := summarizeLogSnippet(logText, 8); summary != "" {
+			return "", fmt.Errorf("background server process %d exited quickly; log: %s", pid, summary)
+		}
+		return "", fmt.Errorf("background server process %d exited quickly", pid)
+	}
+
+	if hasPID {
+		return fmt.Sprintf("Started background server (PID %d). Log: %s", pid, logPath), nil
+	}
+	return fmt.Sprintf("Started background server. Log: %s", logPath), nil
+}
+
+func readTextFileAtMost(path string, maxBytes int64) string {
+	if strings.TrimSpace(path) == "" || maxBytes <= 0 {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
+	if err != nil || len(data) == 0 || isProbablyBinary(data) {
+		return ""
+	}
+	return string(data)
+}
+
+func detectServerStartFailure(logText string) string {
+	low := strings.ToLower(logText)
+	if strings.TrimSpace(low) == "" {
+		return ""
+	}
+	markers := []string{
+		"eaddrinuse",
+		"address already in use",
+		"port is already in use",
+		"failed to start",
+		"error: listen",
+		"permission denied",
+		"module not found",
+		"cannot find module",
+		"command not found",
+	}
+	for _, marker := range markers {
+		if strings.Contains(low, marker) {
+			return summarizeLogSnippet(logText, 8)
+		}
+	}
+	return ""
+}
+
+func looksLikeServerReadyLog(logText string) bool {
+	low := strings.ToLower(logText)
+	if strings.TrimSpace(low) == "" {
+		return false
+	}
+	markers := []string{
+		"ready in",
+		"listening on",
+		"server running",
+		"compiled successfully",
+		"local:",
+		"localhost",
+		"127.0.0.1",
+	}
+	for _, marker := range markers {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractLocalServerURL(logText string) string {
+	url := localServerURLRe.FindString(logText)
+	if strings.TrimSpace(url) == "" {
+		return ""
+	}
+	return strings.ReplaceAll(url, "0.0.0.0", "127.0.0.1")
+}
+
+func summarizeLogSnippet(logText string, maxLines int) string {
+	logText = strings.TrimSpace(logText)
+	if logText == "" {
+		return ""
+	}
+	if maxLines <= 0 {
+		maxLines = 6
+	}
+	lines := strings.Split(logText, "\n")
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	summary := strings.Join(lines, " | ")
+	if len(summary) > 500 {
+		summary = summary[:500] + "..."
+	}
+	return summary
+}
+
+func verifyPythonHTTPBackgroundLaunch(command, runDir string, output []byte) (string, error) {
+	if !hasShellBackgroundOperator(command) {
+		return "", nil
+	}
+	port, ok := parsePythonHTTPServerPort(command)
+	if !ok {
+		return "", nil
+	}
+
+	pid, hasPID := extractBackgroundPID(string(output))
+
+	// Give the server a brief window to bind before probing.
+	time.Sleep(250 * time.Millisecond)
+
+	// If the reported PID is already gone, this commonly indicates bind failure.
+	if hasPID && !isProcessAlive(pid) {
+		status, body, fetchErr := fetchLocalHTTPRoot(port, 1500*time.Millisecond)
+		if fetchErr != nil {
+			return "", fmt.Errorf("background server PID %d exited quickly; failed to serve http://127.0.0.1:%d (%v)", pid, port, fetchErr)
+		}
+		if status >= http.StatusBadRequest {
+			return "", fmt.Errorf("background server PID %d exited quickly; port %d returned HTTP %d", pid, port, status)
+		}
+		match, detail := responseMatchesProjectIndex(runDir, body)
+		if match {
+			return fmt.Sprintf("Port %d was already serving expected project content (%s).", port, detail), nil
+		}
+		return "", fmt.Errorf("background server PID %d exited quickly and port %d serves different content (%s)", pid, port, detail)
+	}
+
+	status, body, fetchErr := fetchLocalHTTPRoot(port, 2*time.Second)
+	if fetchErr != nil {
+		if hasPID {
+			return "", fmt.Errorf("python http.server started with PID %d but http://127.0.0.1:%d is not reachable: %v", pid, port, fetchErr)
+		}
+		return "", fmt.Errorf("python http.server did not become reachable on http://127.0.0.1:%d: %v", port, fetchErr)
+	}
+	if status >= http.StatusBadRequest {
+		return "", fmt.Errorf("python http.server on port %d returned HTTP %d", port, status)
+	}
+
+	match, detail := responseMatchesProjectIndex(runDir, body)
+	if !match {
+		return "", fmt.Errorf("server on port %d responded with unexpected content (%s)", port, detail)
+	}
+	if hasPID {
+		return fmt.Sprintf("Verified http://127.0.0.1:%d serves expected project content (PID %d, %s).", port, pid, detail), nil
+	}
+	return fmt.Sprintf("Verified http://127.0.0.1:%d serves expected project content (%s).", port, detail), nil
+}
+
+func hasShellBackgroundOperator(command string) bool {
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	for i := 0; i < len(command); i++ {
+		ch := command[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble || ch != '&' {
+			continue
+		}
+
+		var prev byte
+		if i > 0 {
+			prev = command[i-1]
+		}
+		var next byte
+		if i+1 < len(command) {
+			next = command[i+1]
+		}
+
+		// Ignore && and redirection operators (2>&1, &>file).
+		if prev == '&' || next == '&' || prev == '>' || prev == '<' || next == '>' || next == '<' {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func parsePythonHTTPServerPort(command string) (int, bool) {
+	if !strings.Contains(strings.ToLower(command), "http.server") {
+		return 0, false
+	}
+
+	tokens := strings.Fields(command)
+	seenHTTPServer := false
+	for i := 0; i < len(tokens); i++ {
+		token := strings.Trim(tokens[i], " \t\r\n;|&")
+		token = strings.Trim(token, `"'`)
+
+		if strings.EqualFold(token, "http.server") {
+			seenHTTPServer = true
+			continue
+		}
+		if !seenHTTPServer || token == "" {
+			continue
+		}
+		if strings.HasPrefix(token, ">") || strings.HasPrefix(token, "<") || strings.Contains(token, ">&") || strings.Contains(token, "<&") {
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			// Skip bind argument value.
+			if token == "--bind" || token == "-b" {
+				if i+1 < len(tokens) {
+					i++
+				}
+			}
+			continue
+		}
+		if port, ok := parsePortToken(token); ok {
+			return port, true
+		}
+	}
+
+	// python -m http.server defaults to port 8000.
+	return 8000, true
+}
+
+func parsePortToken(token string) (int, bool) {
+	token = strings.Trim(token, " \t\r\n;|&")
+	if strings.Contains(token, ">&") || strings.Contains(token, "<&") {
+		return 0, false
+	}
+	token = strings.TrimPrefix(token, "http://")
+	token = strings.TrimPrefix(token, "https://")
+	if idx := strings.LastIndex(token, ":"); idx >= 0 {
+		token = token[idx+1:]
+	}
+
+	// Accept leading digits only (e.g. "8000>/dev/null").
+	i := 0
+	for i < len(token) && token[i] >= '0' && token[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, false
+	}
+	port, err := strconv.Atoi(token[:i])
+	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+	return port, true
+}
+
+func extractBackgroundPID(output string) (int, bool) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil || pid <= 1 {
+			continue
+		}
+		return pid, true
+	}
+	return 0, false
+}
+
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	if errno, ok := err.(syscall.Errno); ok && errno == syscall.EPERM {
+		return true
+	}
+	return false
+}
+
+func fetchLocalHTTPRoot(port int, timeout time.Duration) (int, string, error) {
+	if port < 1 || port > 65535 {
+		return 0, "", fmt.Errorf("invalid port %d", port)
+	}
+
+	target := fmt.Sprintf("http://127.0.0.1:%d", port)
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	deadline := time.Now().Add(timeout)
+
+	var lastErr error
+	for {
+		resp, err := client.Get(target)
+		if err == nil {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+			resp.Body.Close()
+			if readErr != nil {
+				return resp.StatusCode, "", readErr
+			}
+			return resp.StatusCode, string(body), nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timed out reaching %s", target)
+	}
+	return 0, "", lastErr
+}
+
+func responseMatchesProjectIndex(runDir, body string) (bool, string) {
+	runDir = strings.TrimSpace(runDir)
+	if runDir == "" {
+		return true, "skipped index match (no working directory)"
+	}
+
+	indexPath := filepath.Join(runDir, "index.html")
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, "skipped index match (index.html not found)"
+		}
+		return false, fmt.Sprintf("failed to read %s: %v", indexPath, err)
+	}
+
+	marker := extractIndexHTMLMarker(string(data))
+	if marker == "" {
+		return true, "skipped index match (no stable marker in index.html)"
+	}
+	if strings.Contains(body, marker) {
+		return true, fmt.Sprintf("matched marker %q", marker)
+	}
+	return false, fmt.Sprintf("expected marker %q from %s", marker, indexPath)
+}
+
+func extractIndexHTMLMarker(indexHTML string) string {
+	if m := indexTitleRe.FindStringSubmatch(indexHTML); len(m) == 2 {
+		marker := strings.TrimSpace(m[1])
+		if marker != "" {
+			return marker
+		}
+	}
+	if m := indexScriptRe.FindStringSubmatch(indexHTML); len(m) == 2 {
+		marker := strings.TrimSpace(m[1])
+		if marker != "" {
+			return marker
+		}
+	}
+	candidates := indexTokenRe.FindAllString(indexHTML, 24)
+	for _, candidate := range candidates {
+		if isGenericHTMLMarker(candidate) {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+func isGenericHTMLMarker(marker string) bool {
+	m := strings.ToLower(strings.TrimSpace(marker))
+	switch m {
+	case "doctype", "html", "head", "body", "meta", "script", "charset", "viewport", "utf-8", "root", "main":
+		return true
+	}
+	return false
 }
 
 func (l *AgentLoop) emitToolProgress(call ToolCall, status string, durationMs int64, errText string) {
@@ -2318,6 +2841,10 @@ func (l *AgentLoop) defaultExecTimeout(command string) time.Duration {
 	long := 10 * time.Minute
 
 	cmdLower := strings.ToLower(command)
+	if shouldAutoDetachServerCommand(command) {
+		// Foreground dev servers are long-lived; keep timeout modest so we can detach/verify quickly.
+		return 45 * time.Second
+	}
 	longKeywords := []string{
 		"apt-get", "apt ", "pip install", "pip3 install", "uv pip", "conda", "mamba",
 		"npm ", "yarn ", "pnpm ", "cargo ", "go build", "go test", "make", "cmake",
@@ -2525,10 +3052,25 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 
 		// Prefer bash for better compatibility with common build tooling.
 		shell := "bash"
-		shellArgs := []string{"-lc", args.Command}
+		commandToRun := args.Command
+		autoDetached := false
+		detachedLogPath := ""
+		if shouldAutoDetachServerCommand(args.Command) {
+			wrapped, logPath, wrapErr := buildDetachedServerCommand(args.Command)
+			if wrapErr != nil {
+				result.Error = fmt.Sprintf("failed to prepare detached server command: %v", wrapErr)
+				result.DurationMs = time.Since(start).Milliseconds()
+				return result
+			}
+			commandToRun = wrapped
+			autoDetached = true
+			detachedLogPath = logPath
+		}
+
+		shellArgs := []string{"-lc", commandToRun}
 		if _, err := exec.LookPath(shell); err != nil {
 			shell = "sh"
-			shellArgs = []string{"-c", args.Command}
+			shellArgs = []string{"-c", commandToRun}
 		}
 
 		runDir := ""
@@ -2557,10 +3099,44 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 			}
 		}
 
+		postVerificationNotes := []string{}
+		if err == nil {
+			if autoDetached {
+				pid, hasPID := extractBackgroundPID(string(output))
+				note, detachedVerifyErr := verifyDetachedServerLaunch(ctx, pid, hasPID, detachedLogPath)
+				if detachedVerifyErr != nil {
+					err = detachedVerifyErr
+				} else if strings.TrimSpace(note) != "" {
+					postVerificationNotes = append(postVerificationNotes, note)
+				}
+			}
+		}
+		if err == nil {
+			note, verifyErr := verifyPythonHTTPBackgroundLaunch(commandToRun, runDir, output)
+			if verifyErr != nil {
+				err = verifyErr
+			} else if strings.TrimSpace(note) != "" {
+				postVerificationNotes = append(postVerificationNotes, note)
+			}
+		}
+
+		outputText := string(output)
+		for _, note := range postVerificationNotes {
+			note = strings.TrimSpace(note)
+			if note == "" {
+				continue
+			}
+			outputText = strings.TrimRight(outputText, "\n")
+			if strings.TrimSpace(outputText) != "" {
+				outputText += "\n"
+			}
+			outputText += note
+		}
+
 		if err != nil && strings.TrimSpace(result.Error) == "" {
 			result.Error = err.Error()
 		}
-		result.Output = truncateToolOutput(string(output))
+		result.Output = truncateToolOutput(outputText)
 		result.Success = err == nil
 
 	case "read_file":
