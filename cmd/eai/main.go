@@ -239,6 +239,7 @@ func runOrchestrateWorkerCommand() error {
 	if shardID == "" {
 		shardID = "worker"
 	}
+	useAgentWorker := orchestrateWorkerAgentWorker || strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_AGENT_WORKER")) == "1"
 
 	configPath := app.DefaultConfigPath()
 	cfg, err := app.LoadConfig(configPath)
@@ -310,7 +311,126 @@ func runOrchestrateWorkerCommand() error {
 		}
 	}
 
-	if progressWriter != nil {
+	if useAgentWorker {
+		// Tool-agent worker: read-only shard execution with optional collab tool.
+		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
+		loop := app.NewAgentLoop(application.Client, 25, stateDir, application.Logger)
+		loop.Relentless = true
+		loop.CollabAgentName = fmt.Sprintf("Companion %s", shardID)
+		if collab, ok := application.Memory.(app.CollabStore); ok {
+			loop.Collab = collab
+		}
+		if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+			loop.WorkDir = wd
+		}
+		loop.SystemMessageBuilder = func(_ string) string {
+			return app.ReadOnlyCompanionSystemPrompt(loop.WorkDir)
+		}
+		allowed := map[string]bool{
+			"exec":         true,
+			"read_file":    true,
+			"list_dir":     true,
+			"grep":         true,
+			"search_files": true,
+			"collab":       true,
+		}
+		var tools []app.Tool
+		for _, t := range app.DefaultTools() {
+			if allowed[t.Name] {
+				tools = append(tools, t)
+			}
+		}
+		loop.Tools = tools
+		loop.ToolCallFilter = func(call app.ToolCall) (bool, string) {
+			if call.Name != "exec" {
+				return true, ""
+			}
+			var args struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(call.Arguments, &args); err != nil {
+				return false, "blocked: invalid exec args"
+			}
+			if ok, reason := app.ReadOnlyExecAllowed(args.Command); !ok {
+				return false, reason
+			}
+			return true, ""
+		}
+		if progressWriter != nil {
+			loop.Progress = func(ev app.ProgressEvent) {
+				txt := strings.TrimSpace(ev.Text)
+				if txt == "" {
+					return
+				}
+				payload, err := json.Marshal(progressLine{Kind: ev.Kind, Text: txt})
+				if err != nil {
+					return
+				}
+				_, _ = progressWriter.Write(append(payload, '\n'))
+			}
+		}
+
+		// If the prompt includes the coordinator header, set collab defaults and emit
+		// an initial claim/post so other agents can see this shard is active.
+		if loop.Collab != nil {
+			extractHeader := func(s string) (string, string) {
+				var runID string
+				var scope string
+				lines := strings.Split(s, "\n")
+				for i := 0; i < len(lines); i++ {
+					line := strings.TrimSpace(lines[i])
+					switch {
+					case line == "COLLAB RUN:" && runID == "" && i+1 < len(lines):
+						for j := i + 1; j < len(lines); j++ {
+							next := strings.TrimSpace(lines[j])
+							if next == "" {
+								continue
+							}
+							runID = next
+							break
+						}
+					case strings.HasPrefix(line, "SCOPE") && scope == "" && i+1 < len(lines):
+						for j := i + 1; j < len(lines); j++ {
+							next := strings.TrimSpace(lines[j])
+							if next == "" {
+								continue
+							}
+							scope = next
+							break
+						}
+					}
+				}
+				return strings.TrimSpace(runID), strings.TrimSpace(scope)
+			}
+
+			runID, scope := extractHeader(prompt)
+			if runID != "" {
+				loop.CollabRunID = runID
+			}
+			if scope != "" {
+				_ = scope
+			}
+			if loop.CollabRunID != "" && scope != "" {
+				_, _, _ = loop.Collab.ClaimScope(ctx, loop.CollabRunID, scope, loop.CollabAgentName, 2*time.Minute)
+				_, _ = loop.Collab.PostMessage(ctx, loop.CollabRunID, "", loop.CollabAgentName, "", "status", scope, "starting")
+				if progressWriter != nil {
+					if payload, err := json.Marshal(progressLine{Kind: "collab", Text: fmt.Sprintf("[%s -> *] starting", loop.CollabAgentName)}); err == nil {
+						_, _ = progressWriter.Write(append(payload, '\n'))
+					}
+				}
+			}
+		}
+
+		state, err := loop.Execute(ctx, prompt)
+		if err != nil {
+			completionErr = err
+		} else if state != nil {
+			out = strings.TrimSpace(state.FinalOutput)
+			if out == "" {
+				out = "TASK_COMPLETED"
+			}
+		}
+	} else if progressWriter != nil {
 		out, _, completionErr = application.Client.CompleteStreamingWithObserverMeta(
 			ctx,
 			prompt,
@@ -717,6 +837,7 @@ func main() {
 	workerCmd.Flags().StringVar(&orchestrateWorkerResultFile, "result-file", "", "internal result file")
 	workerCmd.Flags().StringVar(&orchestrateWorkerProgressFile, "progress-file", "", "internal progress file (jsonl)")
 	workerCmd.Flags().IntVar(&orchestrateWorkerAttempt, "attempt", 1, "internal attempt number")
+	workerCmd.Flags().BoolVar(&orchestrateWorkerAgentWorker, "agent-worker", false, "internal: run shard as a read-only tool agent")
 	root.AddCommand(workerCmd)
 
 	if err := root.Execute(); err != nil {
@@ -726,11 +847,12 @@ func main() {
 }
 
 var (
-	orchestrateWorkerAttempt    int
-	orchestrateWorkerPrompt     string
-	orchestrateWorkerResultFile string
-	orchestrateWorkerShardID    string
+	orchestrateWorkerAttempt      int
+	orchestrateWorkerPrompt       string
+	orchestrateWorkerResultFile   string
+	orchestrateWorkerShardID      string
 	orchestrateWorkerProgressFile string
+	orchestrateWorkerAgentWorker  bool
 
 	agentMaxLoops int
 	agentTask     string

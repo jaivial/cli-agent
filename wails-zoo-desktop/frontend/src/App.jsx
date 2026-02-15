@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronDown,
@@ -353,22 +353,62 @@ function animateScrollTop(el, targetTop, durationMs, rafRef) {
 }
 
 function AutoScrollToBottom({ trigger }) {
-  const { scrollRef } = useStickToBottomContext();
+  const { scrollRef, contentRef } = useStickToBottomContext();
   const rafRef = useRef(0);
+  const scheduleRef = useRef(0);
 
-  useEffect(() => {
+  const requestScroll = useCallback(() => {
     const el = scrollRef?.current;
     if (!el) {
-      return undefined;
+      return;
     }
 
-    const raf = requestAnimationFrame(() => {
+    if (scheduleRef.current) {
+      cancelAnimationFrame(scheduleRef.current);
+    }
+    scheduleRef.current = requestAnimationFrame(() => {
+      scheduleRef.current = 0;
       const target = el.scrollHeight - el.clientHeight;
       animateScrollTop(el, target, 2000, rafRef);
     });
+  }, [scrollRef]);
 
-    return () => cancelAnimationFrame(raf);
-  }, [trigger, scrollRef]);
+  useLayoutEffect(() => {
+    requestScroll();
+    return () => {
+      if (scheduleRef.current) {
+        cancelAnimationFrame(scheduleRef.current);
+        scheduleRef.current = 0;
+      }
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+  }, [requestScroll, trigger]);
+
+  useEffect(() => {
+    const node = contentRef?.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    let pending = false;
+    const observer = new ResizeObserver(() => {
+      // Coalesce rapid resize bursts (Framer Motion, images, code blocks, etc.)
+      // to a single scroll request per animation frame.
+      if (pending) {
+        return;
+      }
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        requestScroll();
+      });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [contentRef, requestScroll]);
 
   return null;
 }
@@ -514,7 +554,12 @@ function CompanionBadgeRow({ label }) {
   }
   return (
     <div className="pb-1">
-      <Badge variant="secondary">{txt}</Badge>
+      <Badge
+        variant="secondary"
+        className="bg-[rgba(39,41,45,0.92)] text-[rgba(180,182,185,0.95)] border border-white/10"
+      >
+        {txt}
+      </Badge>
     </div>
   );
 }

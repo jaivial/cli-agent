@@ -64,9 +64,9 @@ func (s *SQLiteSessionStore) init() error {
 
 		schema := []string{
 			`CREATE TABLE IF NOT EXISTS sessions (
-				id TEXT PRIMARY KEY,
-				root_id TEXT NOT NULL,
-				parent_id TEXT,
+					id TEXT PRIMARY KEY,
+					root_id TEXT NOT NULL,
+					parent_id TEXT,
 				child_index INTEGER NOT NULL,
 				project_id TEXT NOT NULL,
 				work_dir TEXT NOT NULL,
@@ -84,16 +84,46 @@ func (s *SQLiteSessionStore) init() error {
 				updated_at_ns INTEGER NOT NULL
 			);`,
 			`CREATE TABLE IF NOT EXISTS messages (
-				id TEXT NOT NULL,
-				session_id TEXT NOT NULL,
-				root_id TEXT NOT NULL,
-				role TEXT NOT NULL,
-				mode TEXT,
-				content TEXT NOT NULL,
-				created_at_ns INTEGER NOT NULL,
-				PRIMARY KEY (session_id, id)
-			);`,
+					id TEXT NOT NULL,
+					session_id TEXT NOT NULL,
+					root_id TEXT NOT NULL,
+					role TEXT NOT NULL,
+					mode TEXT,
+					content TEXT NOT NULL,
+					created_at_ns INTEGER NOT NULL,
+					PRIMARY KEY (session_id, id)
+				);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_root_created ON messages(root_id, created_at_ns);`,
+			`CREATE TABLE IF NOT EXISTS collab_runs (
+					run_id TEXT PRIMARY KEY,
+					session_id TEXT,
+					root_id TEXT NOT NULL,
+					status TEXT,
+					created_at_ns INTEGER NOT NULL,
+					updated_at_ns INTEGER NOT NULL
+				);`,
+			`CREATE INDEX IF NOT EXISTS idx_collab_runs_root_updated ON collab_runs(root_id, updated_at_ns);`,
+			`CREATE TABLE IF NOT EXISTS collab_messages (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					run_id TEXT NOT NULL,
+					session_id TEXT,
+					from_agent TEXT NOT NULL,
+					to_agent TEXT,
+					kind TEXT,
+					scope TEXT,
+					body TEXT NOT NULL,
+					created_at_ns INTEGER NOT NULL
+				);`,
+			`CREATE INDEX IF NOT EXISTS idx_collab_messages_run_id ON collab_messages(run_id, id);`,
+			`CREATE TABLE IF NOT EXISTS collab_claims (
+					run_id TEXT NOT NULL,
+					scope TEXT NOT NULL,
+					claimed_by TEXT NOT NULL,
+					claimed_at_ns INTEGER NOT NULL,
+					expires_at_ns INTEGER,
+					PRIMARY KEY (run_id, scope)
+				);`,
+			`CREATE INDEX IF NOT EXISTS idx_collab_claims_run ON collab_claims(run_id);`,
 		}
 		for _, stmt := range schema {
 			if _, err := db.Exec(stmt); err != nil {
@@ -530,6 +560,16 @@ func (s *SQLiteSessionStore) DeleteSessionChain(workDir string, sessionID string
 	}
 
 	if _, err := tx.Exec(`DELETE FROM messages WHERE session_id IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	// Collab state is tied to the root conversation; delete it too.
+	if _, err := tx.Exec(`DELETE FROM collab_messages WHERE run_id IN (SELECT run_id FROM collab_runs WHERE root_id = ?)`, rootID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM collab_claims WHERE run_id IN (SELECT run_id FROM collab_runs WHERE root_id = ?)`, rootID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM collab_runs WHERE root_id = ?`, rootID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE id IN (`+placeholders+`)`, args...); err != nil {

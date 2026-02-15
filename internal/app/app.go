@@ -527,6 +527,34 @@ func orchestrateLLMDecomposeEnabled() bool {
 	}
 }
 
+func orchestrateCollabEnabled() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_COLLAB")))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func orchestrateWaveCount() int {
+	raw := strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_WAVES"))
+	if raw == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 1
+	}
+	if n < 1 {
+		n = 1
+	}
+	if n > 3 {
+		n = 3
+	}
+	return n
+}
+
 func orchestrateShardTimeout() time.Duration {
 	raw := strings.TrimSpace(os.Getenv(orchestrateShardTimeoutEnv))
 	if raw == "" {
@@ -1055,7 +1083,11 @@ func containsLikelyLocalPath(s string) bool {
 	if strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//") {
 		return true
 	}
-	if strings.Contains(s, "/home/") || strings.Contains(s, "/users/") || strings.Contains(s, "/documents/") || strings.Contains(s, "/desktop/") {
+	// Common top-level user folder references (users often type "/Documents" meaning "~/Documents").
+	// Match with or without a trailing slash.
+	if strings.Contains(s, "/home/") || strings.Contains(s, "/users/") ||
+		strings.Contains(s, "/documents") || strings.Contains(s, "/desktop") || strings.Contains(s, "/downloads") ||
+		strings.Contains(s, "/pictures") || strings.Contains(s, "/music") || strings.Contains(s, "/videos") {
 		return true
 	}
 	// Tilde + relative forms.
@@ -1430,6 +1462,7 @@ func (a *Application) ExecuteChatWithProgressEvents(ctx context.Context, mode Mo
 		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 		agent := NewAgentLoop(a.Client, 12, stateDir, a.Logger)
 		agent.Relentless = true
+		agent.Collab = a.collabStore()
 		agent.PermissionsMode = a.Config.Permissions
 		if wd, err := os.Getwd(); err == nil && wd != "" {
 			agent.WorkDir = wd
@@ -1502,7 +1535,26 @@ func toolCompanionsEnabled() bool {
 	}
 }
 
-func readOnlyCompanionSystemPrompt(workDir string) string {
+func toolCompanionsCollabEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("EAI_TOOL_COMPANIONS_COLLAB"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Application) collabStore() CollabStore {
+	if a == nil || a.Memory == nil {
+		return nil
+	}
+	if c, ok := a.Memory.(CollabStore); ok {
+		return c
+	}
+	return nil
+}
+
+func ReadOnlyCompanionSystemPrompt(workDir string) string {
 	if workDir == "" {
 		workDir = "/app"
 	}
@@ -1524,17 +1576,18 @@ MODE: DISCOVER (READ-ONLY)
   2) A final report (plain text) that ends with a single line:
      TASK_COMPLETED
 
-## Tools available
-- exec: {"tool":"exec","args":{"command":"...", "timeout":600, "cwd":"optional"}}
-- list_dir: {"tool":"list_dir","args":{"path":"..."}}
-- read_file: {"tool":"read_file","args":{"path":"..."}}
-- grep: {"tool":"grep","args":{"pattern":"...","path":"...","recursive":true}}
-- search_files: {"tool":"search_files","args":{"pattern":"*.ext","path":"..."}}
+	## Tools available
+	- exec: {"tool":"exec","args":{"command":"...", "timeout":600, "cwd":"optional"}}
+	- list_dir: {"tool":"list_dir","args":{"path":"..."}}
+	- read_file: {"tool":"read_file","args":{"path":"..."}}
+	- grep: {"tool":"grep","args":{"pattern":"...","path":"...","recursive":true}}
+	- search_files: {"tool":"search_files","args":{"pattern":"*.ext","path":"..."}}
+	- collab: {"tool":"collab","args":{"action":"poll|post|claim|list_claims","run_id":"...","from_agent":"...","scope":"...","body":"..."}}
 
-In the final report include:
-- Relevant files (paths)
-- Key observations (bullet points)
-- Suggested next concrete steps (commands/tools)`, workDir)
+	In the final report include:
+	- Relevant files (paths)
+	- Key observations (bullet points)
+	- Suggested next concrete steps (commands/tools)`, workDir)
 }
 
 func companionTools() []Tool {
@@ -1544,6 +1597,7 @@ func companionTools() []Tool {
 		"list_dir":     true,
 		"grep":         true,
 		"search_files": true,
+		"collab":       true,
 	}
 	var out []Tool
 	for _, t := range DefaultTools() {
@@ -1555,64 +1609,114 @@ func companionTools() []Tool {
 }
 
 func companionExecAllowed(command string) (bool, string) {
-	cmd := strings.ToLower(strings.TrimSpace(command))
-	if cmd == "" {
-		return false, "missing command"
-	}
-	cmd = strings.ReplaceAll(cmd, "\r", " ")
-	cmd = strings.ReplaceAll(cmd, "\n", " ")
-	cmd = strings.Join(strings.Fields(cmd), " ")
-
-	// Block obvious mutation patterns early.
-	if strings.Contains(cmd, ">") || strings.Contains(cmd, ">>") {
-		return false, "blocked: shell redirection"
-	}
-	if strings.Contains(cmd, " tee ") || strings.HasPrefix(cmd, "tee ") || strings.Contains(cmd, "|tee") || strings.Contains(cmd, "| tee") {
-		return false, "blocked: tee writes output"
-	}
-	if strings.Contains(cmd, "sed -i") || strings.Contains(cmd, "perl -i") {
-		return false, "blocked: in-place edits"
-	}
-	if strings.Contains(cmd, "rm ") || strings.Contains(cmd, "mv ") || strings.Contains(cmd, "cp ") || strings.Contains(cmd, "mkdir ") || strings.Contains(cmd, "touch ") {
-		return false, "blocked: filesystem mutation"
-	}
-
-	// Reuse the existing "dangerous" heuristic as a deny list.
-	if execCommandNeedsApproval(command) {
-		return false, "blocked: risky command"
-	}
-
-	allowedPrefixes := []string{
-		"ls", "rg ", "grep ", "cat ", "sed -n", "head ", "tail ", "find ", "wc ",
-		"git status", "git diff", "git log", "git show",
-		"go test", "go list", "go env",
-		"npm test", "pnpm test", "yarn test",
-		"pytest", "python -m pytest",
-	}
-	for _, p := range allowedPrefixes {
-		if strings.HasPrefix(cmd, p) {
-			return true, ""
-		}
-	}
-	return false, "blocked: exec restricted for companions"
+	return ReadOnlyExecAllowed(command)
 }
 
-func buildCompanionDiscoveryTasks(task string, n int) []string {
+type companionAssignment struct {
+	Scope string
+	Focus string
+}
+
+func parseCompanionScopeFromTask(task string) string {
+	for _, line := range strings.Split(task, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "scope:") {
+			return strings.TrimSpace(line[len("scope:"):])
+		}
+	}
+	return ""
+}
+
+func companionAssignmentCatalog(task string) []companionAssignment {
+	low := strings.ToLower(strings.TrimSpace(task))
+
+	base := []companionAssignment{
+		{Scope: "repo-discovery", Focus: "Find relevant files/entrypoints and summarize current behavior."},
+		{Scope: "requirements", Focus: "Extract requirements/constraints; list missing info needed to finish."},
+		{Scope: "ux-ui", Focus: "Propose UX/UI improvements consistent with the request and existing style."},
+		{Scope: "copywriting", Focus: "Draft improved professional copy; list questions for business specifics."},
+		{Scope: "seo-a11y", Focus: "Identify SEO + accessibility quick wins and likely issues."},
+		{Scope: "style-system", Focus: "Suggest typography/colors/layout direction; note design inconsistencies."},
+		{Scope: "build-verify", Focus: "Identify how to build/run/test; propose concrete verification steps."},
+		{Scope: "risks", Focus: "Identify risks/edge cases and likely failure points; suggest mitigations."},
+	}
+
+	// Reorder when the request looks like a marketing site/landing page.
+	if containsOrchestrateToken(low, "website") ||
+		strings.Contains(low, "landing") ||
+		strings.Contains(low, "homepage") ||
+		strings.Contains(low, "index.html") ||
+		containsOrchestrateToken(low, "cv") {
+		return []companionAssignment{
+			base[0],
+			base[2],
+			base[3],
+			base[5],
+			base[4],
+			base[1],
+			base[6],
+			base[7],
+		}
+	}
+
+	return base
+}
+
+func buildCompanionDiscoveryTasks(task string, n int, runID string) []string {
 	task = strings.TrimSpace(task)
+	runID = strings.TrimSpace(runID)
 	if n <= 1 {
 		return []string{task}
 	}
-	focus := []string{
-		"Find relevant files/entrypoints and summarize current behavior.",
-		"Identify likely failure points/edge cases and where to change code.",
-		"Propose concrete next tool steps (commands + files to edit) to complete the task.",
+	assignments := companionAssignmentCatalog(task)
+	if len(assignments) == 0 {
+		assignments = []companionAssignment{{Scope: "discovery", Focus: "Inspect the repo and summarize relevant findings."}}
 	}
+
 	out := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		f := focus[i%len(focus)]
-		out = append(out, "READ-ONLY DISCOVERY COMPANION\n"+
-			"Focus: "+f+"\n\nTask:\n"+task+
-			"\n\nConstraints:\n- Do not modify files.\n- Use tools to inspect; keep outputs small.\n")
+		asn := assignments[i%len(assignments)]
+		scope := strings.TrimSpace(asn.Scope)
+		if scope == "" {
+			scope = "scope"
+		}
+		// Ensure the scope is unique when we exceed the catalog length.
+		if i >= len(assignments) {
+			scope = fmt.Sprintf("%s-%d", scope, i+1)
+		}
+
+		var b strings.Builder
+		b.WriteString("READ-ONLY DISCOVERY COMPANION\n")
+		b.WriteString(fmt.Sprintf("Identity: Companion %d\n", i+1))
+		if runID != "" {
+			b.WriteString("Collab run_id: ")
+			b.WriteString(runID)
+			b.WriteString("\n")
+		}
+		b.WriteString("Scope: ")
+		b.WriteString(scope)
+		b.WriteString("\n")
+		b.WriteString("Focus: ")
+		b.WriteString(strings.TrimSpace(asn.Focus))
+		b.WriteString("\n\n")
+
+		if runID != "" {
+			b.WriteString("Collaboration rules:\n")
+			b.WriteString("- First, call collab.poll (run_id, since_id=0) and read the coordinator assignments.\n")
+			b.WriteString("- Claim your scope with collab.claim before doing any deep work.\n")
+			b.WriteString("- Before deeply reading a file, claim it as scope file:<path> and post what you're extracting.\n")
+			if !strings.Contains(strings.ToLower(scope), "repo") {
+				b.WriteString("- Prefer asking the repo-discovery companion for file snippets instead of rereading core files.\n")
+			}
+			b.WriteString("- Post progress + findings with collab.post so other companions can avoid duplicating your work.\n")
+			b.WriteString("- If you notice overlap, ask via collab.post(kind=question) instead of repeating work.\n\n")
+		}
+
+		b.WriteString("Task:\n")
+		b.WriteString(task)
+		b.WriteString("\n\nConstraints:\n- Do not modify files.\n- Use tools to inspect; keep outputs small.\n")
+
+		out = append(out, b.String())
 	}
 	return out
 }
@@ -1653,6 +1757,7 @@ func (a *Application) executeAgentTaskInSessionWithProgressEventsAndPrelude(ctx 
 	stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 	agent := NewAgentLoop(a.Client, 30, stateDir, a.Logger)
 	agent.Relentless = true
+	agent.Collab = a.collabStore()
 	agent.PermissionsMode = a.Config.Permissions
 	agent.PermissionDecisions = decisions
 	if wd, err := os.Getwd(); err == nil && wd != "" {
@@ -1767,6 +1872,48 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 		})
 	}
 
+	runID := ""
+	if toolCompanionsCollabEnabled() {
+		if collab := a.collabStore(); collab != nil && strings.TrimSpace(sessionID) != "" {
+			if rid, err := collab.StartRun(ctx, "", sessionID); err == nil {
+				runID = strings.TrimSpace(rid)
+				// Post coordinator assignments so companions can see each other's scopes.
+				assignments := companionAssignmentCatalog(task)
+				if len(assignments) == 0 {
+					assignments = []companionAssignment{{Scope: "discovery", Focus: "Inspect the repo and summarize relevant findings."}}
+				}
+				var broadcast strings.Builder
+				broadcast.WriteString("Coordinator assignments:\n")
+				for i := 0; i < companionCount; i++ {
+					asn := assignments[i%len(assignments)]
+					scope := strings.TrimSpace(asn.Scope)
+					if scope == "" {
+						scope = "scope"
+					}
+					if i >= len(assignments) {
+						scope = fmt.Sprintf("%s-%d", scope, i+1)
+					}
+					focus := strings.TrimSpace(asn.Focus)
+					if focus == "" {
+						focus = "Inspect and summarize useful findings."
+					}
+					_, _ = collab.PostMessage(ctx, runID, sessionID, "Coordinator", fmt.Sprintf("Companion %d", i+1), "announce", scope, fmt.Sprintf("Scope: %s\nFocus: %s\nRules: poll + claim scope; post findings; avoid duplicating others.\n", scope, focus))
+					broadcast.WriteString(fmt.Sprintf("- Companion %d: %s | %s\n", i+1, scope, focus))
+				}
+				_, _ = collab.PostMessage(ctx, runID, sessionID, "Coordinator", "", "announce", "", strings.TrimSpace(broadcast.String()))
+				if progress != nil {
+					progress(ProgressEvent{
+						Kind:           "reasoning",
+						Text:           fmt.Sprintf("Coordinator: started collab run %s and assigned scopes", runID),
+						CompanionLabel: "Coordinator",
+						CompanionID:    "coordinator",
+						At:             time.Now(),
+					})
+				}
+			}
+		}
+	}
+
 	type compRes struct {
 		Index int
 		Text  string
@@ -1795,7 +1942,7 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 		})
 	}
 
-	tasks := buildCompanionDiscoveryTasks(task, companionCount)
+	tasks := buildCompanionDiscoveryTasks(task, companionCount, runID)
 	for idx := 0; idx < companionCount; idx++ {
 		i := idx
 		go func() {
@@ -1805,6 +1952,10 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 			stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 			agent := NewAgentLoop(a.Client, 25, stateDir, a.Logger)
 			agent.Relentless = true
+			agent.Collab = a.collabStore()
+			agent.CollabRunID = runID
+			agent.CollabSessionID = sessionID
+			agent.CollabAgentName = fmt.Sprintf("Companion %d", i+1)
 			agent.Tools = companionTools()
 			if progress != nil {
 				agent.Progress = func(ev ProgressEvent) {
@@ -1820,7 +1971,7 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 				if cwd, err := os.Getwd(); err == nil {
 					wd = cwd
 				}
-				return readOnlyCompanionSystemPrompt(wd)
+				return ReadOnlyCompanionSystemPrompt(wd)
 			}
 			agent.ToolCallFilter = func(call ToolCall) (bool, string) {
 				if call.Name != "exec" {
@@ -1848,6 +1999,31 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 			compCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
 
+			scope := parseCompanionScopeFromTask(tasks[i])
+			if strings.TrimSpace(runID) != "" && agent.Collab != nil && strings.TrimSpace(scope) != "" {
+				claimer := strings.TrimSpace(agent.CollabAgentName)
+				if claimer == "" {
+					claimer = fmt.Sprintf("Companion %d", i+1)
+				}
+				claimed, owner, _ := agent.Collab.ClaimScope(compCtx, runID, scope, claimer, 2*time.Minute)
+				status := "starting"
+				if !claimed && strings.TrimSpace(owner) != "" && owner != claimer {
+					status = fmt.Sprintf("starting (scope already claimed by %s)", owner)
+				}
+				_, _ = agent.Collab.PostMessage(compCtx, runID, sessionID, claimer, "", "status", scope, status)
+				if progress != nil {
+					progress(ProgressEvent{
+						Kind:           "collab",
+						Text:           fmt.Sprintf("[%s -> *] %s", claimer, status),
+						CompanionLabel: fmt.Sprintf("Companion %d", i+1),
+						CompanionID:    fmt.Sprintf("%d", i+1),
+						CompanionIndex: i + 1,
+						CompanionTotal: companionCount,
+						At:             time.Now(),
+					})
+				}
+			}
+
 			state, err := agent.Execute(compCtx, tasks[i])
 			out := ""
 			if err == nil && state != nil {
@@ -1859,6 +2035,20 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 			out = truncateEllipsis(strings.TrimSpace(out), 4000)
 			if out == "" {
 				out = "(no companion output)"
+			}
+
+			if strings.TrimSpace(runID) != "" && agent.Collab != nil {
+				claimer := strings.TrimSpace(agent.CollabAgentName)
+				if claimer == "" {
+					claimer = fmt.Sprintf("Companion %d", i+1)
+				}
+				summary := strings.TrimSpace(out)
+				if len(summary) > 260 {
+					summary = summary[:260] + "..."
+				}
+				if strings.TrimSpace(scope) != "" {
+					_, _ = agent.Collab.PostMessage(compCtx, runID, sessionID, claimer, "", "handoff", scope, "done: "+summary)
+				}
 			}
 
 			if progress != nil {
@@ -2150,6 +2340,10 @@ func (a *Application) ExecuteChatInSessionWithProgressEvents(
 		return out, nil
 	}
 
+	if mode == ModeOrchestrate {
+		// Session-aware orchestrate (optionally collaborative/multi-wave).
+		return a.ExecuteOrchestrateInSessionWithProgressEvents(ctx, sessionID, workDir, input, 2, progress)
+	}
 	return a.ExecuteChatWithProgressEvents(ctx, mode, input, progress)
 }
 
@@ -2245,6 +2439,310 @@ func (a *Application) GenerateChatTitle(ctx context.Context, messages []StoredMe
 
 func (a *Application) ExecuteOrchestrate(ctx context.Context, mode Mode, input string, agents int) (string, error) {
 	return a.ExecuteOrchestrateWithProgressEvents(ctx, mode, input, agents, nil)
+}
+
+func collectCollabTranscript(ctx context.Context, collab CollabStore, runID string, maxMessages int) string {
+	if collab == nil {
+		return ""
+	}
+	if maxMessages <= 0 {
+		maxMessages = 200
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ""
+	}
+
+	var (
+		since int64
+		lines []string
+	)
+	for len(lines) < maxMessages {
+		batch := minInt(200, maxMessages-len(lines))
+		msgs, last, err := collab.PollMessages(ctx, runID, since, batch)
+		if err != nil || len(msgs) == 0 {
+			break
+		}
+		for _, m := range msgs {
+			from := strings.TrimSpace(m.FromAgent)
+			if from == "" {
+				from = "Agent"
+			}
+			to := strings.TrimSpace(m.ToAgent)
+			if to == "" {
+				to = "*"
+			}
+			meta := strings.TrimSpace(strings.Join(strings.Fields(strings.TrimSpace(m.Kind+" "+m.Scope)), " "))
+			if meta != "" {
+				meta = " " + meta
+			}
+			body := strings.TrimSpace(m.Body)
+			body = strings.Join(strings.Fields(body), " ")
+			if len(body) > 260 {
+				body = body[:260] + "..."
+			}
+			lines = append(lines, fmt.Sprintf("[%s -> %s]%s %s", from, to, meta, body))
+		}
+		since = last
+	}
+
+	out := strings.TrimSpace(strings.Join(lines, "\n"))
+	if len(out) > 12000 {
+		out = out[:12000] + "\n...[truncated]..."
+	}
+	return out
+}
+
+func buildCollaborativeShardPrompt(runID string, agentName string, scope string, wave int, index int, total int, subtask string, fullTask string, extraContext string) string {
+	runID = strings.TrimSpace(runID)
+	agentName = strings.TrimSpace(agentName)
+	scope = strings.TrimSpace(scope)
+	subtask = strings.TrimSpace(subtask)
+	fullTask = strings.TrimSpace(fullTask)
+	extraContext = strings.TrimSpace(extraContext)
+
+	var b strings.Builder
+	b.WriteString("COLLAB RUN:\n")
+	b.WriteString(runID)
+	b.WriteString("\n")
+	b.WriteString("YOU ARE:\n")
+	b.WriteString(agentName)
+	b.WriteString("\n")
+	b.WriteString("SCOPE (claim this):\n")
+	b.WriteString(scope)
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("Wave %d | Task %d/%d\n\n", wave, index, maxInt(total, 1)))
+	b.WriteString("Instructions:\n")
+	b.WriteString("- Start by calling collab.poll(run_id, since_id=0) to see coordinator assignments and other agent updates.\n")
+	b.WriteString("- Claim your scope with collab.claim(run_id, scope, from_agent) before deep work.\n")
+	b.WriteString("- Before deeply reading a file, claim it as scope file:<path> and post what you're extracting.\n")
+	b.WriteString("- Post progress and findings with collab.post so other agents avoid duplicating work.\n")
+	b.WriteString("- If you detect overlap, ask the relevant agent via collab.post(kind=question) instead of repeating work.\n")
+	b.WriteString("- DO NOT modify files.\n\n")
+
+	if extraContext != "" {
+		b.WriteString("Context from previous wave(s):\n")
+		b.WriteString(truncateEllipsis(extraContext, 6000))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("User request:\n")
+	b.WriteString(fullTask)
+	b.WriteString("\n\n")
+	b.WriteString("Your assigned subtask:\n")
+	b.WriteString(subtask)
+	b.WriteString("\n\nReturn a final report (bullets ok) and end with TASK_COMPLETED.")
+	return b.String()
+}
+
+func (a *Application) ExecuteOrchestrateInSessionWithProgressEvents(
+	ctx context.Context,
+	sessionID string,
+	workDir string,
+	input string,
+	agents int,
+	progress func(ProgressEvent),
+) (string, error) {
+	if a == nil {
+		return "", errors.New("application is nil")
+	}
+	if a.Client == nil {
+		return "", errors.New("client is required")
+	}
+
+	// Match existing orchestrate behavior: fail friendly when key missing.
+	if a.Client != nil && a.Client.APIKey == "" && a.Client.BaseURL != "mock://" {
+		return "No API key configured. Run `/connect` in the TUI or set `EAI_API_KEY`/`MINIMAX_API_KEY` (and optionally `EAI_MODEL`, `EAI_BASE_URL`).", nil
+	}
+	if agents <= 0 {
+		agents = 1
+	}
+
+	if progress != nil {
+		shards := a.orchestrateTaskConcurrencyBudget(agents)
+		workers := a.orchestrateActivePaneCap()
+		progress(ProgressEvent{
+			Kind: "thinking",
+			Text: fmt.Sprintf("Orchestrate: up to %d shard(s), %d concurrent", shards, workers),
+			At:   time.Now(),
+		})
+	}
+
+	collab := a.collabStore()
+	if !orchestrateCollabEnabled() || collab == nil || strings.TrimSpace(sessionID) == "" {
+		return a.ExecuteOrchestrateWithProgressEvents(ctx, ModeOrchestrate, input, agents, progress)
+	}
+
+	waves := orchestrateWaveCount()
+	if waves < 1 {
+		waves = 1
+	}
+
+	runID, err := collab.StartRun(ctx, "", sessionID)
+	if err != nil || strings.TrimSpace(runID) == "" {
+		return a.ExecuteOrchestrateWithProgressEvents(ctx, ModeOrchestrate, input, agents, progress)
+	}
+	runID = strings.TrimSpace(runID)
+
+	if progress != nil {
+		progress(ProgressEvent{
+			Kind:           "reasoning",
+			Text:           fmt.Sprintf("collaborative run %s (%d wave(s))", runID, waves),
+			CompanionLabel: "Coordinator",
+			CompanionID:    "coordinator",
+			At:             time.Now(),
+		})
+	}
+
+	// Wave 1 tasks: reuse the existing splitter/decomposer to get enough shards.
+	maxBudget := a.orchestrateTaskConcurrencyBudget(agents)
+	tasks := splitTaskForOrchestration(input, maxBudget)
+	if len(tasks) == 0 {
+		tasks = []string{input}
+	}
+	desired := orchestrateDesiredShardCount(maxBudget, input, len(tasks))
+	if desired > len(tasks) && orchestrateLLMDecomposeEnabled() && maxBudget >= 4 {
+		if decomp, err := llmDecomposeOrchestrate(ctx, a.Client, input, desired); err == nil && len(decomp) > len(tasks) {
+			tasks = decomp
+		}
+	}
+	if desired > len(tasks) {
+		tasks = padOrchestrateTasks(tasks, desired, input)
+	}
+	if len(tasks) > maxBudget {
+		tasks = tasks[:maxBudget]
+	}
+
+	all := make([]TaskResult, 0, 64)
+	extraContext := ""
+
+	runWave := func(wave int, waveTasks []string) []TaskResult {
+		if len(waveTasks) == 0 {
+			return nil
+		}
+
+		// Coordinator announcements.
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Wave %d assignments:\n", wave))
+		for i, t := range waveTasks {
+			id := fmt.Sprintf("w%d-%d", wave, i+1)
+			agentName := fmt.Sprintf("Companion %s", id)
+			scope := id
+			_ = strings.TrimSpace(scope)
+			_, _ = collab.PostMessage(ctx, runID, sessionID, "Coordinator", agentName, "announce", scope, fmt.Sprintf("Assigned: %s\nScope: %s\nRun: %s", truncateEllipsis(t, 180), scope, runID))
+			b.WriteString(fmt.Sprintf("- %s: %s\n", agentName, truncateEllipsis(t, 220)))
+		}
+		_, _ = collab.PostMessage(ctx, runID, sessionID, "Coordinator", "", "announce", fmt.Sprintf("wave-%d", wave), strings.TrimSpace(b.String()))
+		if progress != nil {
+			if txt := strings.TrimSpace(b.String()); txt != "" {
+				progress(ProgressEvent{
+					Kind:           "collab",
+					Text:           txt,
+					CompanionLabel: "Coordinator",
+					CompanionID:    "coordinator",
+					At:             time.Now(),
+				})
+			}
+		}
+
+		if progress != nil {
+			progress(ProgressEvent{
+				Kind:           "reasoning",
+				Text:           fmt.Sprintf("starting wave %d with %d shard(s)", wave, len(waveTasks)),
+				CompanionLabel: "Coordinator",
+				CompanionID:    "coordinator",
+				At:             time.Now(),
+			})
+		}
+
+		shards := make([]TaskShard, 0, len(waveTasks))
+		for i, t := range waveTasks {
+			id := fmt.Sprintf("w%d-%d", wave, i+1)
+			agentName := fmt.Sprintf("Companion %s", id)
+			scope := id
+			shards = append(shards, TaskShard{
+				ID:      id,
+				Index:   i,
+				Total:   len(waveTasks),
+				Subtask: t,
+				Prompt:  buildCollaborativeShardPrompt(runID, agentName, scope, wave, i+1, len(waveTasks), t, input, extraContext),
+			})
+		}
+
+		return a.executeOrchestrateShardsWithRetries(ctx, ModeOrchestrate, input, shards, progress)
+	}
+
+	// Wave 1
+	w1 := runWave(1, tasks)
+	all = append(all, w1...)
+	extraContext = truncateEllipsis(SynthesizeResults(w1), 9000)
+
+	if waves >= 2 {
+		w2Tasks := []string{
+			"Review wave 1 outputs and collab chat; identify gaps and missing requirements/questions.",
+			"Resolve overlaps/contradictions across outputs; propose a cohesive structure.",
+			"Propose concrete next steps and validation steps to complete the request quickly.",
+		}
+		if len(w2Tasks) > maxBudget {
+			w2Tasks = w2Tasks[:maxBudget]
+		}
+		w2 := runWave(2, w2Tasks)
+		all = append(all, w2...)
+		extraContext = truncateEllipsis(extraContext+"\n\n"+SynthesizeResults(w2), 9000)
+	}
+
+	if waves >= 3 {
+		w3Tasks := []string{
+			"Verify the combined plan/answer is complete and internally consistent; list any remaining open questions.",
+		}
+		w3 := runWave(3, w3Tasks)
+		all = append(all, w3...)
+		extraContext = truncateEllipsis(extraContext+"\n\n"+SynthesizeResults(w3), 9000)
+	}
+
+	// Final coordinator synthesis.
+	if progress != nil {
+		progress(ProgressEvent{
+			Kind:           "thinking",
+			Text:           "synthesizing final answer",
+			CompanionLabel: "Coordinator",
+			CompanionID:    "coordinator",
+			At:             time.Now(),
+		})
+	}
+
+	collabTranscript := collectCollabTranscript(ctx, collab, runID, 200)
+	synthPrompt := strings.Builder{}
+	synthPrompt.WriteString("[SYSTEM]\nYou are the coordinator. Produce the final answer for the user.\n")
+	synthPrompt.WriteString("Use the companion outputs and collab chat to avoid duplication. Be concise and actionable.\n\n")
+	synthPrompt.WriteString("[USER]\nUser request:\n")
+	synthPrompt.WriteString(strings.TrimSpace(input))
+	synthPrompt.WriteString("\n\nCompanion outputs:\n")
+	synthPrompt.WriteString(truncateEllipsis(SynthesizeResults(all), 14000))
+	if strings.TrimSpace(collabTranscript) != "" {
+		synthPrompt.WriteString("\n\nCollab chat excerpt:\n")
+		synthPrompt.WriteString(collabTranscript)
+	}
+	synthPrompt.WriteString("\n\nReturn the final response now.")
+
+	out, err := a.Client.Complete(ctx, synthPrompt.String())
+	if err != nil {
+		// Fall back to raw shard synthesis.
+		raw := strings.TrimSpace(SynthesizeResults(all))
+		if raw == "" {
+			return "", err
+		}
+		return raw, nil
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		out = strings.TrimSpace(SynthesizeResults(all))
+	}
+	if out == "" {
+		return "", errors.New("empty orchestrate output")
+	}
+	_ = workDir // reserved for future run scoping
+	return out, nil
 }
 
 func (a *Application) ExecuteOrchestrateWithProgressEvents(
@@ -2843,12 +3341,17 @@ func (a *Application) executeOrchestrateShardInTmuxWithMeta(ctx context.Context,
 	// tmux panes inherit the tmux server environment, not this process env. Provide
 	// critical env vars explicitly so workers can read API keys and config overrides.
 	tmuxArgs = append(tmuxArgs, "-e", "EAI_TMUX_WORKER=1")
+	// Provide a stable per-pane agent name for collab tool defaults.
+	tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("EAI_COLLAB_AGENT=Companion %s", strings.TrimSpace(shard.ID)))
 	for _, name := range []string{
 		"EAI_API_KEY",
 		"MINIMAX_API_KEY",
 		"EAI_BASE_URL",
 		"EAI_MODEL",
 		"EAI_MAX_TOKENS",
+		"EAI_ORCHESTRATE_AGENT_WORKER",
+		"EAI_ORCHESTRATE_COLLAB",
+		"EAI_ORCHESTRATE_WAVES",
 		"EAI_PERMISSIONS",
 		"EAI_SKIP_TLS_VERIFY",
 		"EAI_HTTP_TIMEOUT_SEC",
@@ -2859,16 +3362,16 @@ func (a *Application) executeOrchestrateShardInTmuxWithMeta(ctx context.Context,
 			tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("%s=%s", name, v))
 		}
 	}
-		target := strings.TrimSpace(os.Getenv("EAI_TMUX_TARGET"))
-		if target == "" {
-			if pane := strings.TrimSpace(os.Getenv("TMUX_PANE")); pane != "" {
-				target = pane
-			} else if strings.TrimSpace(os.Getenv("EAI_TMUX_HEADLESS")) == "1" {
-				if sessName, err := a.ensureHeadlessTmuxSession(ctx); err == nil && sessName != "" {
-					target = sessName + ":0"
-				}
+	target := strings.TrimSpace(os.Getenv("EAI_TMUX_TARGET"))
+	if target == "" {
+		if pane := strings.TrimSpace(os.Getenv("TMUX_PANE")); pane != "" {
+			target = pane
+		} else if strings.TrimSpace(os.Getenv("EAI_TMUX_HEADLESS")) == "1" {
+			if sessName, err := a.ensureHeadlessTmuxSession(ctx); err == nil && sessName != "" {
+				target = sessName + ":0"
 			}
 		}
+	}
 	if target != "" {
 		tmuxArgs = append(tmuxArgs, "-t", target)
 	}
@@ -2939,6 +3442,65 @@ func (a *Application) executeOrchestrateShardInTmuxWithMeta(ctx context.Context,
 func (a *Application) completeOrchestrateShardWithMeta(ctx context.Context, prompt string, shard TaskShard, attempt int, progress func(ProgressEvent)) (string, orchestrateShardCallMeta, error) {
 	if a.canRunOrchestrateShardsInTmux() {
 		return a.executeOrchestrateShardInTmuxWithMeta(ctx, prompt, shard, attempt, progress)
+	}
+
+	// When the desktop enables collaborative shards, run a read-only tool agent in-process
+	// as a fallback when tmux isn't available.
+	if strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_AGENT_WORKER")) == "1" && orchestrateCollabEnabled() {
+		start := time.Now()
+
+		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
+		agent := NewAgentLoop(a.Client, 25, stateDir, a.Logger)
+		agent.Relentless = true
+		agent.Collab = a.collabStore()
+		agent.CollabAgentName = fmt.Sprintf("Companion %s", strings.TrimSpace(shard.ID))
+		agent.Tools = companionTools()
+		agent.SystemMessageBuilder = func(_ string) string {
+			wd := ""
+			if cwd, err := os.Getwd(); err == nil {
+				wd = cwd
+			}
+			return ReadOnlyCompanionSystemPrompt(wd)
+		}
+		agent.ToolCallFilter = func(call ToolCall) (bool, string) {
+			if call.Name != "exec" {
+				return true, ""
+			}
+			var args struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(call.Arguments, &args); err != nil {
+				return false, "blocked: invalid exec args"
+			}
+			return companionExecAllowed(args.Command)
+		}
+
+		compLabel := fmt.Sprintf("Companion %s", strings.TrimSpace(shard.ID))
+		compID := strings.TrimSpace(shard.ID)
+		compIndex := shard.Index + 1
+		compTotal := shard.Total
+		if progress != nil {
+			agent.Progress = func(ev ProgressEvent) {
+				ev.CompanionLabel = compLabel
+				ev.CompanionID = compID
+				ev.CompanionIndex = compIndex
+				ev.CompanionTotal = compTotal
+				progress(ev)
+			}
+		}
+
+		state, err := agent.Execute(ctx, prompt)
+		out := ""
+		if err == nil && state != nil {
+			out = strings.TrimSpace(stripTaskCompletedSentinel(state.FinalOutput))
+			if out == "" {
+				out = strings.TrimSpace(renderAgentStateForChat(state))
+			}
+		}
+		if out == "" && err == nil {
+			out = "TASK_COMPLETED"
+		}
+		return out, orchestrateShardCallMeta{WorkerDuration: time.Since(start)}, err
 	}
 
 	start := time.Now()
@@ -3478,15 +4040,24 @@ func llmDecomposeOrchestrate(ctx context.Context, client *MinimaxClient, input s
 }
 
 func splitTaskForOrchestration(input string, maxShards int) []string {
-	task := strings.TrimSpace(input)
-	if task == "" {
+	full := strings.TrimSpace(input)
+	if full == "" {
 		return []string{""}
 	}
 	if maxShards <= 1 {
-		return []string{task}
+		return []string{full}
 	}
 	if maxShards > 100 {
 		maxShards = 100
+	}
+
+	task := full
+	// If the request is wrapped with session context ("Current request: ... Conversation context ..."),
+	// split only the request body so we don't create shards for the wrapper headers.
+	if _, request, _, ok := splitToolSessionContextWrapper(full); ok {
+		if trimmed := strings.TrimSpace(request); trimmed != "" {
+			task = trimmed
+		}
 	}
 
 	if shards := normalizeOrchestrateShards(splitTaskByLines(task), maxShards); len(shards) >= 2 {

@@ -56,19 +56,19 @@ export function SessionSidebar({
           />
 
           <motion.aside
-            className="absolute left-0 top-0 flex h-full w-[360px] max-w-[86vw] flex-col border-r border-slate-800 bg-slate-950 px-4 py-5 text-slate-100 shadow-xl"
+            className="absolute left-0 top-0 flex h-full w-[360px] max-w-[86vw] flex-col border-r border-white/10 bg-[rgba(39,41,45,0.92)] px-4 py-5 text-[rgba(180,182,185,0.95)] shadow-xl"
             initial={{ x: -420 }}
             animate={{ x: 0 }}
             exit={{ x: -420 }}
             transition={{ duration: 0.5, ease: "easeInOut" }}
           >
             <div className="mb-4 flex items-center justify-between">
-              <div className="text-sm font-semibold tracking-wide text-slate-100/90">
+              <div className="text-sm font-semibold tracking-wide text-[rgba(180,182,185,0.95)]">
                 Sessions
               </div>
               <button
                 type="button"
-                className="rounded-full px-2 py-1 text-xs text-slate-300/80 transition-colors hover:bg-white/5 hover:text-slate-100"
+                className="rounded-full px-2 py-1 text-xs text-[rgba(180,182,185,0.75)] transition-colors hover:bg-white/5 hover:text-[rgba(180,182,185,0.95)]"
                 onClick={onClose}
               >
                 Close
@@ -97,9 +97,9 @@ export function SessionSidebar({
                         type="button"
                         onClick={() => (id ? onSelectSession?.(id) : null)}
                         className={cn(
-                          "group relative w-full rounded-2xl border bg-slate-900 px-4 py-3 text-left transition-colors",
-                          "border-slate-800 hover:border-slate-700 hover:bg-slate-900/95",
-                          isActive ? "ring-1 ring-cyan-400/60" : ""
+                          "group relative w-full rounded-2xl border px-4 py-3 text-left transition-colors",
+                          "border-white/10 bg-[rgba(39,41,45,0.92)] hover:border-white/15 hover:bg-[rgba(39,41,45,0.96)]",
+                          isActive ? "ring-1 ring-white/15" : ""
                         )}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -111,18 +111,18 @@ export function SessionSidebar({
                                 animate={{ opacity: 1, x: 0 }}
                                 exit={{ opacity: 0, x: 10 }}
                                 transition={{ duration: 2, ease: "easeInOut" }}
-                                className="truncate text-sm font-semibold text-slate-100"
+                                className="truncate text-sm font-semibold text-[rgba(180,182,185,0.95)]"
                               >
                                 {title}
                               </motion.div>
                             </AnimatePresence>
-                            <div className="mt-1 flex items-center justify-between text-xs text-slate-400">
+                            <div className="mt-1 flex items-center justify-between text-xs text-[rgba(180,182,185,0.55)]">
                               <span className="truncate">
                                 {typeof s?.message_count === "number"
                                   ? `${s.message_count} msg`
                                   : ""}
                               </span>
-                              <span className="shrink-0 text-right text-slate-400/90">
+                              <span className="shrink-0 text-right text-[rgba(180,182,185,0.55)]">
                                 {last}
                               </span>
                             </div>
@@ -139,8 +139,8 @@ export function SessionSidebar({
                               }
                             }}
                             className={cn(
-                              "mt-0.5 inline-flex items-center justify-center rounded-full p-2 text-slate-300/80",
-                              "opacity-0 transition-opacity duration-[2000ms] ease-in-out group-hover:opacity-100 hover:bg-white/5 hover:text-slate-100"
+                              "mt-0.5 inline-flex items-center justify-center rounded-full p-2 text-[rgba(180,182,185,0.75)]",
+                              "opacity-0 transition-opacity duration-[2000ms] ease-in-out group-hover:opacity-100 hover:bg-white/5 hover:text-[rgba(180,182,185,0.95)]"
                             )}
                           >
                             <DeleteIcon size={18} />
@@ -153,7 +153,7 @@ export function SessionSidebar({
               </AnimatePresence>
 
               {rows.length === 0 ? (
-                <div className="mt-10 text-center text-xs text-slate-400">
+                <div className="mt-10 text-center text-xs text-[rgba(180,182,185,0.55)]">
                   No sessions yet.
                 </div>
               ) : null}

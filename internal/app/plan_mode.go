@@ -358,6 +358,7 @@ func (a *Application) executePlanModeWithProgressEvents(
 
 	stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 	agent := NewAgentLoop(a.Client, 10, stateDir, a.Logger)
+	agent.Collab = a.collabStore()
 	if wd, err := os.Getwd(); err == nil && wd != "" {
 		agent.WorkDir = wd
 	}

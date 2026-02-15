@@ -426,22 +426,22 @@ type ToolResult struct {
 }
 
 type ProgressEvent struct {
-	Kind       string `json:"kind"`
-	Text       string `json:"text"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
 	// CompanionLabel identifies which companion (if any) emitted this event.
 	CompanionLabel string `json:"companion_label,omitempty"`
 	CompanionID    string `json:"companion_id,omitempty"`
 	CompanionIndex int    `json:"companion_index,omitempty"`
 	CompanionTotal int    `json:"companion_total,omitempty"`
-	Tool       string `json:"tool,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolStatus string `json:"tool_status,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Command    string `json:"command,omitempty"`
-	ChangeType string `json:"change_type,omitempty"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-	DurationMs int64  `json:"duration_ms,omitempty"`
+	Tool           string `json:"tool,omitempty"`
+	ToolCallID     string `json:"tool_call_id,omitempty"`
+	ToolStatus     string `json:"tool_status,omitempty"`
+	Path           string `json:"path,omitempty"`
+	Command        string `json:"command,omitempty"`
+	ChangeType     string `json:"change_type,omitempty"`
+	OldContent     string `json:"old_content,omitempty"`
+	NewContent     string `json:"new_content,omitempty"`
+	DurationMs     int64  `json:"duration_ms,omitempty"`
 	// ActiveCompanions shows how many worker slots/shards are running right now.
 	ActiveCompanions int `json:"active_companions,omitempty"`
 	// MaxCompanions reports the orchestrator worker ceiling for the current run.
@@ -496,6 +496,13 @@ type AgentLoop struct {
 	// ToolCallFilter, when set, can deny a tool call at execution time (after parsing).
 	// This is used to enforce read-only companion agents, etc.
 	ToolCallFilter func(call ToolCall) (allowed bool, reason string)
+
+	// Collab, when set, enables the `collab` tool for agent-to-agent coordination.
+	Collab CollabStore
+	// Collab defaults (prefer these over global env vars for in-process companions).
+	CollabRunID     string
+	CollabSessionID string
+	CollabAgentName string
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -689,6 +696,60 @@ func DefaultTools() []Tool {
 					},
 				},
 				"required": []string{"path", "patch"},
+			}),
+		},
+		{
+			Name:        "collab",
+			Description: "Shared collaboration blackboard: post/poll messages and claim scopes to avoid duplicate work across companions/shards",
+			Parameters: mustMarshal(map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"action": map[string]interface{}{
+						"type":        "string",
+						"description": "One of: start_run|post|poll|claim|list_claims|release_claim",
+					},
+					"run_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Collaboration run ID (optional for start_run; defaults to env EAI_COLLAB_RUN_ID when omitted)",
+					},
+					"session_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional session ID for attribution (defaults to env EAI_COLLAB_SESSION_ID when omitted)",
+					},
+					"from_agent": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent name posting/claiming (defaults to env EAI_COLLAB_AGENT when omitted)",
+					},
+					"to_agent": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional recipient agent name (blank means broadcast)",
+					},
+					"kind": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional message kind (announce|question|answer|handoff|status)",
+					},
+					"scope": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope identifier for claims/messages (e.g. index.html, seo, api-schema)",
+					},
+					"body": map[string]interface{}{
+						"type":        "string",
+						"description": "Message body (for post)",
+					},
+					"since_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Poll: return messages with id > since_id (default 0)",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Poll limit (default 50, max 200)",
+					},
+					"ttl_sec": map[string]interface{}{
+						"type":        "integer",
+						"description": "Claim TTL in seconds (default 120)",
+					},
+				},
+				"required": []string{"action"},
 			}),
 		},
 	}
@@ -1401,6 +1462,22 @@ func (l *AgentLoop) apiKeyForRedaction() string {
 
 func (l *AgentLoop) toolProgressDetails(call ToolCall) (path, command string) {
 	switch call.Name {
+	case "collab":
+		// Surface scope/action for tool progress UI.
+		var args struct {
+			Action string `json:"action"`
+			Scope  string `json:"scope"`
+			RunID  string `json:"run_id"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		command = strings.TrimSpace(args.Action)
+		if command == "" {
+			command = "collab"
+		}
+		path = strings.TrimSpace(args.Scope)
+		if path == "" {
+			path = strings.TrimSpace(args.RunID)
+		}
 	case "exec":
 		var args struct {
 			Command string `json:"command"`
@@ -3063,6 +3140,48 @@ func (l *AgentLoop) resolvePath(path string) string {
 		}
 	}
 
+	// Users often write "/Documents/..." meaning "$HOME/Documents/..." (same for Desktop/Downloads/etc).
+	// Only rewrite when "/Documents" doesn't exist but "$HOME/Documents" does.
+	if filepath.IsAbs(path) && strings.HasPrefix(path, string(filepath.Separator)) {
+		rel := strings.TrimPrefix(filepath.Clean(path), string(filepath.Separator))
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) > 0 {
+			firstRaw := strings.TrimSpace(parts[0])
+			first := strings.ToLower(firstRaw)
+			canon := map[string]string{
+				"documents": "Documents",
+				"desktop":   "Desktop",
+				"downloads": "Downloads",
+				"pictures":  "Pictures",
+				"music":     "Music",
+				"videos":    "Videos",
+			}
+			if folder, ok := canon[first]; ok && folder != "" {
+				rootFolder := string(filepath.Separator) + firstRaw
+				if st, err := os.Stat(rootFolder); err != nil || !st.IsDir() {
+					if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+						candidates := []string{
+							filepath.Join(home, folder),
+						}
+						if firstRaw != folder {
+							candidates = append(candidates, filepath.Join(home, firstRaw))
+						}
+						for _, base := range candidates {
+							if st2, err2 := os.Stat(base); err2 == nil && st2.IsDir() {
+								if len(parts) > 1 {
+									path = filepath.Join(append([]string{base}, parts[1:]...)...)
+								} else {
+									path = base
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Treat common user folders as home-relative when referenced directly (e.g., "Desktop/eai").
 	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "."+string(filepath.Separator)) && !strings.HasPrefix(path, ".."+string(filepath.Separator)) {
 		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
@@ -3303,6 +3422,223 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 	}
 
 	switch call.Name {
+	case "collab":
+		var args struct {
+			Action    string `json:"action"`
+			RunID     string `json:"run_id"`
+			SessionID string `json:"session_id"`
+			FromAgent string `json:"from_agent"`
+			ToAgent   string `json:"to_agent"`
+			Kind      string `json:"kind"`
+			Scope     string `json:"scope"`
+			Body      string `json:"body"`
+			SinceID   int64  `json:"since_id"`
+			Limit     int    `json:"limit"`
+			TTLSec    int    `json:"ttl_sec"`
+		}
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			result.Error = fmt.Sprintf("Failed to parse arguments: %v", err)
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
+		store := l.Collab
+		if store == nil {
+			result.Error = "collab store unavailable"
+			break
+		}
+
+		action := strings.ToLower(strings.TrimSpace(args.Action))
+		if action == "" {
+			result.Error = "missing action"
+			break
+		}
+
+		runID := strings.TrimSpace(args.RunID)
+		if runID == "" {
+			runID = strings.TrimSpace(l.CollabRunID)
+		}
+		if runID == "" {
+			runID = strings.TrimSpace(os.Getenv("EAI_COLLAB_RUN_ID"))
+		}
+
+		sessionID := strings.TrimSpace(args.SessionID)
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(l.CollabSessionID)
+		}
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(os.Getenv("EAI_COLLAB_SESSION_ID"))
+		}
+
+		fromAgent := strings.TrimSpace(args.FromAgent)
+		if fromAgent == "" {
+			fromAgent = strings.TrimSpace(l.CollabAgentName)
+		}
+		if fromAgent == "" {
+			fromAgent = strings.TrimSpace(os.Getenv("EAI_COLLAB_AGENT"))
+		}
+		if fromAgent == "" {
+			fromAgent = "Agent"
+		}
+
+		toAgent := strings.TrimSpace(args.ToAgent)
+		kind := strings.TrimSpace(args.Kind)
+		scope := strings.TrimSpace(args.Scope)
+		body := strings.TrimSpace(args.Body)
+
+		switch action {
+		case "start_run":
+			id, err := store.StartRun(ctx, runID, sessionID)
+			if err != nil {
+				result.Error = err.Error()
+				break
+			}
+			id = strings.TrimSpace(id)
+			if id != "" {
+				l.CollabRunID = id
+			}
+			result.Output = fmt.Sprintf("run_id=%s", id)
+			result.Success = true
+
+		case "post":
+			if runID == "" {
+				result.Error = "missing run_id"
+				break
+			}
+			if body == "" {
+				result.Error = "missing body"
+				break
+			}
+
+			id, err := store.PostMessage(ctx, runID, sessionID, fromAgent, toAgent, kind, scope, body)
+			if err != nil {
+				result.Error = err.Error()
+				break
+			}
+
+			// Stream collab chat into the UI (thoughts style) without forcing the model
+			// to echo it manually.
+			if l.Progress != nil {
+				to := toAgent
+				if to == "" {
+					to = "*"
+				}
+				meta := strings.TrimSpace(strings.Join(strings.Fields(strings.TrimSpace(kind+" "+scope)), " "))
+				if meta != "" {
+					meta = " " + meta
+				}
+				text := fmt.Sprintf("-> %s%s: %s", to, meta, body)
+				l.emitProgress(ProgressEvent{
+					Kind: "collab",
+					Text: text,
+				})
+			}
+
+			result.Output = fmt.Sprintf("message_id=%d", id)
+			result.Success = true
+
+		case "poll":
+			if runID == "" {
+				result.Error = "missing run_id"
+				break
+			}
+			limit := args.Limit
+			if limit <= 0 || limit > 200 {
+				limit = 50
+			}
+			msgs, last, err := store.PollMessages(ctx, runID, args.SinceID, limit)
+			if err != nil {
+				result.Error = err.Error()
+				break
+			}
+			var b strings.Builder
+			b.WriteString(fmt.Sprintf("last_id=%d\n", last))
+			for _, m := range msgs {
+				from := strings.TrimSpace(m.FromAgent)
+				if from == "" {
+					from = "Agent"
+				}
+				to := strings.TrimSpace(m.ToAgent)
+				if to == "" {
+					to = "*"
+				}
+				meta := strings.TrimSpace(strings.Join(strings.Fields(strings.TrimSpace(m.Kind+" "+m.Scope)), " "))
+				if meta != "" {
+					meta = " " + meta
+				}
+				line := fmt.Sprintf("- id=%d [%s -> %s]%s %s", m.ID, from, to, meta, strings.TrimSpace(m.Body))
+				b.WriteString(truncateEllipsis(line, 1200))
+				b.WriteString("\n")
+			}
+			result.Output = strings.TrimSpace(b.String())
+			result.Success = true
+
+		case "claim":
+			if runID == "" {
+				result.Error = "missing run_id"
+				break
+			}
+			if scope == "" {
+				result.Error = "missing scope"
+				break
+			}
+			ttl := time.Duration(args.TTLSec) * time.Second
+			if ttl <= 0 {
+				ttl = 2 * time.Minute
+			}
+			claimed, owner, err := store.ClaimScope(ctx, runID, scope, fromAgent, ttl)
+			if err != nil {
+				result.Error = err.Error()
+				break
+			}
+			result.Output = fmt.Sprintf("claimed=%t owner=%s", claimed, strings.TrimSpace(owner))
+			result.Success = true
+
+		case "list_claims":
+			if runID == "" {
+				result.Error = "missing run_id"
+				break
+			}
+			claims, err := store.ListClaims(ctx, runID)
+			if err != nil {
+				result.Error = err.Error()
+				break
+			}
+			var b strings.Builder
+			for _, c := range claims {
+				line := fmt.Sprintf("- scope=%s claimed_by=%s", strings.TrimSpace(c.Scope), strings.TrimSpace(c.ClaimedBy))
+				if !c.ExpiresAt.IsZero() {
+					line += fmt.Sprintf(" expires=%s", c.ExpiresAt.Format(time.RFC3339))
+				}
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+			result.Output = strings.TrimSpace(b.String())
+			if result.Output == "" {
+				result.Output = "(no claims)"
+			}
+			result.Success = true
+
+		case "release_claim":
+			if runID == "" {
+				result.Error = "missing run_id"
+				break
+			}
+			if scope == "" {
+				result.Error = "missing scope"
+				break
+			}
+			if err := store.ReleaseClaim(ctx, runID, scope, fromAgent); err != nil {
+				result.Error = err.Error()
+				break
+			}
+			result.Output = "released"
+			result.Success = true
+
+		default:
+			result.Error = fmt.Sprintf("invalid action: %s", action)
+		}
+
 	case "exec":
 		var args struct {
 			Command string `json:"command"`

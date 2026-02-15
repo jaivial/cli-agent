@@ -7,7 +7,9 @@ import { cn } from "@/lib/utils";
 
 export const Conversation = ({ className, ...props }) => (
   <StickToBottom
-    className={cn("relative flex-1 overflow-y-hidden", className)}
+    // Give the scroll container a deterministic height so StickToBottom.Content's
+    // internal scrollRef (height: 100%) is actually scrollable.
+    className={cn("relative h-screen w-full overflow-hidden", className)}
     initial="smooth"
     resize="smooth"
     role="log"

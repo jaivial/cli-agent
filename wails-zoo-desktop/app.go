@@ -65,9 +65,9 @@ type DesktopChatMessage struct {
 }
 
 type DesktopSessionCard struct {
-	ID          string    `json:"id"`
-	RootID      string    `json:"root_id"`
-	Title       string    `json:"title"`
+	ID           string    `json:"id"`
+	RootID       string    `json:"root_id"`
+	Title        string    `json:"title"`
 	LastActivity time.Time `json:"last_activity"`
 	MessageCount int       `json:"message_count"`
 }
@@ -135,10 +135,24 @@ func (a *App) applyDesktopRuntimeDefaults() {
 	if _, ok := os.LookupEnv("EAI_TOOL_COMPANIONS"); !ok {
 		os.Setenv("EAI_TOOL_COMPANIONS", "1")
 	}
+	// Enable shared blackboard coordination for companions so they avoid duplicated work.
+	if _, ok := os.LookupEnv("EAI_TOOL_COMPANIONS_COLLAB"); !ok {
+		os.Setenv("EAI_TOOL_COMPANIONS_COLLAB", "1")
+	}
 	// Desktop prioritizes responsiveness; allow an extra (small) LLM call to decompose
 	// short-but-large requests into enough shards to keep all panes busy.
 	if _, ok := os.LookupEnv("EAI_ORCHESTRATE_LLM_DECOMPOSE"); !ok {
 		os.Setenv("EAI_ORCHESTRATE_LLM_DECOMPOSE", "1")
+	}
+	// Enable collaborative orchestration (multi-wave) by default in desktop.
+	if _, ok := os.LookupEnv("EAI_ORCHESTRATE_COLLAB"); !ok {
+		os.Setenv("EAI_ORCHESTRATE_COLLAB", "1")
+	}
+	if _, ok := os.LookupEnv("EAI_ORCHESTRATE_WAVES"); !ok {
+		os.Setenv("EAI_ORCHESTRATE_WAVES", "3")
+	}
+	if _, ok := os.LookupEnv("EAI_ORCHESTRATE_AGENT_WORKER"); !ok {
+		os.Setenv("EAI_ORCHESTRATE_AGENT_WORKER", "1")
 	}
 
 	if _, ok := os.LookupEnv("EAI_ORCHESTRATE_ACTIVE_PANES"); !ok {
