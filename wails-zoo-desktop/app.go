@@ -39,17 +39,17 @@ type App struct {
 }
 
 type DesktopRunStatus struct {
-	RunID               string    `json:"run_id"`
-	Status              string    `json:"status"`
-	Ready               bool      `json:"ready"`
-	ReadyAt             time.Time `json:"ready_at"`
-	APIKeyConfigured    bool      `json:"api_key_configured"`
-	Mode                string    `json:"mode"`
-	HasTmux             bool      `json:"has_tmux"`
-	MaxParallelAgents   int       `json:"max_parallel_agents"`
-	OrchestrateParallel int       `json:"orchestrate_parallel"`
-	Model               string    `json:"model"`
-	BaseURL             string    `json:"base_url"`
+	RunID               string `json:"run_id"`
+	Status              string `json:"status"`
+	Ready               bool   `json:"ready"`
+	ReadyAt             int64  `json:"ready_at"`
+	APIKeyConfigured    bool   `json:"api_key_configured"`
+	Mode                string `json:"mode"`
+	HasTmux             bool   `json:"has_tmux"`
+	MaxParallelAgents   int    `json:"max_parallel_agents"`
+	OrchestrateParallel int    `json:"orchestrate_parallel"`
+	Model               string `json:"model"`
+	BaseURL             string `json:"base_url"`
 }
 
 type DesktopProgressEvent struct {
@@ -58,18 +58,18 @@ type DesktopProgressEvent struct {
 }
 
 type DesktopChatMessage struct {
-	ID        string    `json:"id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type DesktopSessionCard struct {
-	ID           string    `json:"id"`
-	RootID       string    `json:"root_id"`
-	Title        string    `json:"title"`
-	LastActivity time.Time `json:"last_activity"`
-	MessageCount int       `json:"message_count"`
+	ID           string `json:"id"`
+	RootID       string `json:"root_id"`
+	Title        string `json:"title"`
+	LastActivity int64  `json:"last_activity"`
+	MessageCount int    `json:"message_count"`
 }
 
 func NewApp() *App {
@@ -240,7 +240,7 @@ func (a *App) buildStatus() DesktopRunStatus {
 		Model:               "",
 		BaseURL:             "",
 		RunID:               a.activeRunID,
-		ReadyAt:             a.readyAt,
+		ReadyAt:             a.readyAt.UnixMilli(),
 	}
 	if a.application == nil {
 		return st
@@ -355,7 +355,7 @@ func (a *App) GetChatHistory() ([]DesktopChatMessage, error) {
 			ID:        m.ID,
 			Role:      role,
 			Content:   m.Content,
-			CreatedAt: m.CreatedAt,
+			CreatedAt: m.CreatedAt.UnixMilli(),
 		})
 	}
 
@@ -400,7 +400,7 @@ func (a *App) ListSessions(limit int) ([]DesktopSessionCard, error) {
 			ID:           sess.ID,
 			RootID:       sess.RootID,
 			Title:        title,
-			LastActivity: s.LastActivity,
+			LastActivity: s.LastActivity.UnixMilli(),
 			MessageCount: s.MessageCount,
 		})
 	}
@@ -600,7 +600,7 @@ func (a *App) SwitchSession(sessionID string) ([]DesktopChatMessage, error) {
 			ID:        m.ID,
 			Role:      role,
 			Content:   m.Content,
-			CreatedAt: m.CreatedAt,
+			CreatedAt: m.CreatedAt.UnixMilli(),
 		})
 	}
 

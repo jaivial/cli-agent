@@ -29,8 +29,7 @@ export namespace main {
 	    id: string;
 	    role: string;
 	    content: string;
-	    // Go type: time
-	    created_at: any;
+	    created_at: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DesktopChatMessage(source);
@@ -41,33 +40,14 @@ export namespace main {
 	        this.id = source["id"];
 	        this.role = source["role"];
 	        this.content = source["content"];
-	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.created_at = source["created_at"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class DesktopRunStatus {
 	    run_id: string;
 	    status: string;
 	    ready: boolean;
-	    // Go type: time
-	    ready_at: any;
+	    ready_at: number;
 	    api_key_configured: boolean;
 	    mode: string;
 	    has_tmux: boolean;
@@ -85,7 +65,7 @@ export namespace main {
 	        this.run_id = source["run_id"];
 	        this.status = source["status"];
 	        this.ready = source["ready"];
-	        this.ready_at = this.convertValues(source["ready_at"], null);
+	        this.ready_at = source["ready_at"];
 	        this.api_key_configured = source["api_key_configured"];
 	        this.mode = source["mode"];
 	        this.has_tmux = source["has_tmux"];
@@ -94,31 +74,12 @@ export namespace main {
 	        this.model = source["model"];
 	        this.base_url = source["base_url"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class DesktopSessionCard {
 	    id: string;
 	    root_id: string;
 	    title: string;
-	    // Go type: time
-	    last_activity: any;
+	    last_activity: number;
 	    message_count: number;
 	
 	    static createFrom(source: any = {}) {
@@ -130,27 +91,9 @@ export namespace main {
 	        this.id = source["id"];
 	        this.root_id = source["root_id"];
 	        this.title = source["title"];
-	        this.last_activity = this.convertValues(source["last_activity"], null);
+	        this.last_activity = source["last_activity"];
 	        this.message_count = source["message_count"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }
