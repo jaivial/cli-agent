@@ -17,12 +17,14 @@ El instalador configura/instala `tmux` de forma silenciosa para orquestación en
 ### Opción 1: Instalador automático (recomendado)
 
 ```bash
-# Con curl
-curl -sSL https://raw.githubusercontent.com/jaivial/cli-agent/main/install.sh | bash
+# Instalar (o actualizar)
+curl -fsSL https://raw.githubusercontent.com/jaivial/cli-agent/main/install.sh | bash
 
-# O si necesitas sudo
-curl -sSL https://raw.githubusercontent.com/jaivial/cli-agent/main/install.sh | sudo bash
+# Instalación system-wide (si tu /usr/local/bin requiere root)
+curl -fsSL https://raw.githubusercontent.com/jaivial/cli-agent/main/install.sh | sudo bash
 ```
+
+Para actualizar en el futuro, ejecuta el mismo comando otra vez. El instalador reemplaza el binario con la versión más reciente.
 
 ### Opción 2: Instalación manual
 
@@ -141,6 +143,10 @@ Variables de entorno para paralelo de orquestación:
 - `EAI_ORCHESTRATE_ACTIVE_PANES` (por defecto: `5`)
 
 Con estos valores, el modo `orchestrate` puede crear hasta `2 x 5 = 10` shards iniciales y mantener `EAI_ORCHESTRATE_ACTIVE_PANES` panes activos de forma concurrente.
+
+Atajo CLI equivalente:
+
+- `eai --orchestrate-parallel 5` fija `EAI_ORCHESTRATE_ACTIVE_PANES=5` y ajusta el presupuesto de shards para usar 5 panes (por defecto: 2 "olas" = `10` shards).
 
 ## ⌨️ Atajos de teclado
 

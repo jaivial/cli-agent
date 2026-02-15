@@ -37,4 +37,3 @@ func TestBuildPlanContextForExecution_PinsLikelyTargetFile(t *testing.T) {
 		t.Fatalf("expected prompt context to include tool trace, got: %q", out)
 	}
 }
-

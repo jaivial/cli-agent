@@ -527,6 +527,17 @@ func (m *MainModel) submitUserRequest(query string, display string) tea.Cmd {
 		return m.logAndShowError("session error", err)
 	}
 
+	// Before persisting this user turn, ensure the session is compacted (if needed)
+	// and update m.session if it rolled to a child session.
+	if m.app != nil && m.session != nil {
+		compactCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		next, err := m.app.PrepareSessionForTurn(compactCtx, m.sessionWorkDir(), m.session.ID, m.mode, query, nil)
+		cancel()
+		if err == nil && next != nil {
+			m.session = next
+		}
+	}
+
 	userMsg := Message{
 		ID:        fmt.Sprintf("user-%d", time.Now().UnixNano()),
 		Role:      "user",
@@ -1362,14 +1373,16 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Intercept paste events to capture long text blobs and image paths as
-		// attachments while keeping the input UI compact.
-		if msg.Type == tea.KeyRunes && msg.Paste {
-			if m.tryConsumePasteAsAttachment(string(msg.Runes)) {
-				wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
-				m.updateSlashPopupState()
-				m.applyLayout()
-				m.updateViewport()
+			// Intercept paste events to capture long text blobs and image paths as
+			// attachments while keeping the input UI compact.
+			// Bubble Tea v0.25 doesn't expose a Paste flag; in practice, pasted
+			// content arrives as a single KeyRunes event with many runes.
+			if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
+				if m.tryConsumePasteAsAttachment(string(msg.Runes)) {
+					wasAtBottom := m.stickToBottom || m.viewport.AtBottom()
+					m.updateSlashPopupState()
+					m.applyLayout()
+					m.updateViewport()
 				if wasAtBottom {
 					m.viewport.GotoBottom()
 					m.stickToBottom = true
@@ -2781,7 +2794,7 @@ func (m *MainModel) sendMessageWithProgress(ctx context.Context, query string, p
 		var response string
 		var err error
 		if m.mode == app.ModeOrchestrate {
-			response, err = m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, m.mode, query, cb)
+			response, err = m.app.ExecuteChatInSessionWithProgressEvents(ctx, sid, workDir, m.mode, query, cb, m.permissionDecisionCh)
 		} else {
 			response, err = m.app.ExecuteAgentTaskInSessionWithProgressEvents(ctx, sid, workDir, query, cb, m.permissionDecisionCh)
 		}

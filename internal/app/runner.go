@@ -24,16 +24,16 @@ const MaxOutputBufferSize = 1024 * 1024
 
 // BackgroundProcess represents a running background process
 type BackgroundProcess struct {
-	PID        int
-	Command    string
-	Stdin      io.WriteCloser
-	Stdout     io.ReadCloser
-	Stderr     io.ReadCloser
-	OutputBuf  *strings.Builder
-	OutputMu   sync.Mutex
-	StartedAt  time.Time
-	Done       chan struct{}
-	ExitCode   *int
+	PID       int
+	Command   string
+	Stdin     io.WriteCloser
+	Stdout    io.ReadCloser
+	Stderr    io.ReadCloser
+	OutputBuf *strings.Builder
+	OutputMu  sync.Mutex
+	StartedAt time.Time
+	Done      chan struct{}
+	ExitCode  *int
 }
 
 // BackgroundProcessManager manages background processes
@@ -241,7 +241,7 @@ func (r *Runner) WaitForPort(port int, timeout time.Duration) bool {
 // RunVMWithStreaming runs a VM command with output streaming for boot detection
 func (r *Runner) RunVMWithStreaming(ctx context.Context, command string, bootIndicators []string, timeout time.Duration) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	
+
 	// Create pipes for streaming output
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -251,16 +251,16 @@ func (r *Runner) RunVMWithStreaming(ctx context.Context, command string, bootInd
 	if err != nil {
 		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
-	
+
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start VM: %w", err)
 	}
-	
+
 	// Stream and monitor output
 	var outputBuilder strings.Builder
 	var outputMu sync.Mutex
 	done := make(chan bool)
-	
+
 	// Read stdout
 	go func() {
 		scanner := bufio.NewScanner(stdout)
@@ -277,7 +277,7 @@ func (r *Runner) RunVMWithStreaming(ctx context.Context, command string, bootInd
 			}
 		}
 	}()
-	
+
 	// Read stderr
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -294,7 +294,7 @@ func (r *Runner) RunVMWithStreaming(ctx context.Context, command string, bootInd
 			}
 		}
 	}()
-	
+
 	// Wait for boot indicator or timeout
 	select {
 	case <-done:
@@ -313,7 +313,7 @@ func (r *Runner) GetVMPid(vmName string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("VM not found: %s", vmName)
 	}
-	
+
 	pidStr := strings.TrimSpace(string(output))
 	pid := 0
 	_, err = fmt.Sscanf(pidStr, "%d", &pid)

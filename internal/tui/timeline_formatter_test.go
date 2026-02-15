@@ -74,4 +74,3 @@ func TestFormatTimeline_TrimsLongTimelines(t *testing.T) {
 		t.Fatalf("expected truncation marker, got:\n%s", got)
 	}
 }
-

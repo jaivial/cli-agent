@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,7 +32,7 @@ const permissionsValues = "full-access|dangerously-full-access"
 const (
 	orchestrateWorkerCommand = "orchestrate-worker"
 	orchestrateWorkerEnvVar  = "EAI_TMUX_WORKER"
-	noTmuxEnvVar            = "EAI_NO_TMUX"
+	noTmuxEnvVar             = "EAI_NO_TMUX"
 )
 
 var isInteractiveTerminalFn = isInteractiveTerminal
@@ -54,6 +54,11 @@ func applyEnvOverrides(cfg *app.Config) {
 			cfg.MaxTokens = n
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("EAI_CONTEXT_WINDOW_TOKENS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.ContextWindowTokens = n
+		}
+	}
 	if v := strings.TrimSpace(os.Getenv("EAI_PERMISSIONS")); v != "" {
 		cfg.Permissions = app.NormalizePermissionsMode(v)
 	}
@@ -65,6 +70,16 @@ func applyEnvOverrides(cfg *app.Config) {
 func applyFlagOverrides(cmd *cobra.Command, cfg *app.Config) error {
 	if cfg == nil || cmd == nil {
 		return nil
+	}
+	if parallel, err := cmd.Flags().GetInt("orchestrate-parallel"); err == nil && parallel > 0 {
+		// Treat this as "number of panes" for orchestrate mode: scale both the active
+		// pane cap and the shard budget (default: 2 waves of panes).
+		os.Setenv("EAI_ORCHESTRATE_ACTIVE_PANES", strconv.Itoa(parallel))
+		os.Setenv("EAI_ORCHESTRATE_MAX_PANES_PER_TASK", strconv.Itoa(parallel))
+		os.Setenv("EAI_ORCHESTRATE_MAX_SHARDS", strconv.Itoa(parallel*2))
+		if cfg.MaxParallelAgents < parallel {
+			cfg.MaxParallelAgents = parallel
+		}
 	}
 	if v, _ := cmd.Flags().GetString("permissions"); strings.TrimSpace(v) != "" {
 		mode, ok := app.ParsePermissionsMode(v)
@@ -202,18 +217,19 @@ func launchCurrentProcessInTmux(argv []string) error {
 }
 
 type orchestrateWorkerResult struct {
-	ShardID   string `json:"shard_id"`
-	Attempt   int    `json:"attempt"`
-	Output    string `json:"output"`
-	Error     string `json:"error"`
-	CacheHit  bool   `json:"cache_hit"`
-	DurationMs int64 `json:"duration_ms"`
+	ShardID    string `json:"shard_id"`
+	Attempt    int    `json:"attempt"`
+	Output     string `json:"output"`
+	Error      string `json:"error"`
+	CacheHit   bool   `json:"cache_hit"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 func runOrchestrateWorkerCommand() error {
 	shardID := strings.TrimSpace(orchestrateWorkerShardID)
 	prompt := strings.TrimSpace(orchestrateWorkerPrompt)
 	resultFile := strings.TrimSpace(orchestrateWorkerResultFile)
+	progressFile := strings.TrimSpace(orchestrateWorkerProgressFile)
 	if resultFile == "" {
 		return fmt.Errorf("missing --result-file")
 	}
@@ -243,15 +259,75 @@ func runOrchestrateWorkerCommand() error {
 	defer cancel()
 
 	start := time.Now()
-	out, completionErr := application.Client.Complete(ctx, prompt)
+	var (
+		out           string
+		completionErr error
+	)
+
+	type progressLine struct {
+		Kind string `json:"kind,omitempty"`
+		Text string `json:"text"`
+	}
+
+	var progressWriter *os.File
+	var lastFlush time.Time
+	var pending strings.Builder
+	flushPending := func() {
+		if progressWriter == nil || pending.Len() == 0 {
+			return
+		}
+		payload, err := json.Marshal(progressLine{Kind: "delta", Text: pending.String()})
+		if err != nil {
+			pending.Reset()
+			return
+		}
+		_, _ = progressWriter.Write(append(payload, '\n'))
+		pending.Reset()
+		lastFlush = time.Now()
+	}
+
+	addDelta := func(text string) {
+		if progressWriter == nil {
+			return
+		}
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		pending.WriteString(text)
+		// Throttle progress writes to avoid flooding the UI/FS.
+		if pending.Len() >= 512 || (lastFlush.IsZero() || time.Since(lastFlush) >= 120*time.Millisecond) {
+			flushPending()
+		}
+	}
+
+	if progressFile != "" {
+		if f, err := os.OpenFile(progressFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			progressWriter = f
+			defer func() {
+				flushPending()
+				_ = progressWriter.Close()
+			}()
+		}
+	}
+
+	if progressWriter != nil {
+		out, _, completionErr = application.Client.CompleteStreamingWithObserverMeta(
+			ctx,
+			prompt,
+			addDelta,
+			addDelta,
+		)
+	} else {
+		out, completionErr = application.Client.Complete(ctx, prompt)
+	}
 	duration := time.Since(start)
 
 	result := orchestrateWorkerResult{
-		ShardID:   shardID,
-		Attempt:   orchestrateWorkerAttempt,
-		Output:    out,
+		ShardID:    shardID,
+		Attempt:    orchestrateWorkerAttempt,
+		Output:     out,
 		DurationMs: duration.Milliseconds(),
-		CacheHit:  false,
+		CacheHit:   false,
 	}
 	if completionErr != nil {
 		result.Error = completionErr.Error()
@@ -282,7 +358,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("    COMPREPLY=()")
 		fmt.Println("    cur=\"${COMP_WORDS[COMP_CWORD]}\"")
 		fmt.Println("    prev=\"${COMP_WORDS[COMP_CWORD-1]}\"")
-		fmt.Println("    opts=\"agent install resume completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --permissions --no-tui --help\"")
+		fmt.Println("    opts=\"agent install resume completion help version ask architect plan do code debug orchestrate --mock --max-loops --mode --permissions --orchestrate-parallel --no-tui --help\"")
 		fmt.Println("    if [[ $COMP_CWORD -eq 1 ]]; then")
 		fmt.Println("        COMPREPLY=( $(compgen -W \"${opts}\" -- \"${cur}\" )")
 		fmt.Println("    fi")
@@ -299,6 +375,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("        '(-n --no-tui)'{-n,--no-tui}'[use simple REPL instead of TUI]' \\")
 		fmt.Println("        '(-m --mode)'{-m,--mode}'[set mode]:mode:(ask architect plan do code debug orchestrate)' \\")
 		fmt.Println("        '--permissions[set permissions mode]:permissions:(full-access dangerously-full-access)' \\")
+		fmt.Println("        '--orchestrate-parallel[orchestrate: max concurrent panes]:count:(1 2 3 4 5 6 8 10)' \\")
 		fmt.Println("        '*::command:->command'")
 		fmt.Println("    case $state in")
 		fmt.Println("        command)")
@@ -316,6 +393,7 @@ func generateCompletion(shell string) error {
 		fmt.Println("complete -c eai -s n -l no-tui -d 'Use simple REPL'")
 		fmt.Println("complete -c eai -s m -l mode -d 'Set mode' -a 'ask architect plan do code debug orchestrate'")
 		fmt.Println("complete -c eai -l permissions -d 'Set permissions mode' -a 'full-access dangerously-full-access'")
+		fmt.Println("complete -c eai -l orchestrate-parallel -d 'Orchestrate: max concurrent panes'")
 	default:
 		return fmt.Errorf("unsupported shell: %s", shell)
 	}
@@ -416,6 +494,7 @@ func main() {
 	root.Flags().BoolP("version", "v", false, "Print version information")
 	root.Flags().String("completion", "", "Generate shell completion (bash|zsh|fish)")
 	root.PersistentFlags().String("permissions", "", "permissions mode: full-access|dangerously-full-access")
+	root.PersistentFlags().Int("orchestrate-parallel", 0, "orchestrate: number of concurrent panes (also scales shard budget)")
 
 	installCmd := &cobra.Command{
 		Use:   "install",
@@ -636,6 +715,7 @@ func main() {
 	workerCmd.Flags().StringVar(&orchestrateWorkerShardID, "shard-id", "", "internal shard id")
 	workerCmd.Flags().StringVar(&orchestrateWorkerPrompt, "prompt", "", "internal shard prompt")
 	workerCmd.Flags().StringVar(&orchestrateWorkerResultFile, "result-file", "", "internal result file")
+	workerCmd.Flags().StringVar(&orchestrateWorkerProgressFile, "progress-file", "", "internal progress file (jsonl)")
 	workerCmd.Flags().IntVar(&orchestrateWorkerAttempt, "attempt", 1, "internal attempt number")
 	root.AddCommand(workerCmd)
 
@@ -646,10 +726,11 @@ func main() {
 }
 
 var (
-	orchestrateWorkerAttempt  int
-	orchestrateWorkerPrompt   string
+	orchestrateWorkerAttempt    int
+	orchestrateWorkerPrompt     string
 	orchestrateWorkerResultFile string
-	orchestrateWorkerShardID  string
+	orchestrateWorkerShardID    string
+	orchestrateWorkerProgressFile string
 
 	agentMaxLoops int
 	agentTask     string

@@ -188,7 +188,7 @@ func scaffoldViteReactApp(dir string, title string) ([]string, error) {
 		},
 		"devDependencies": map[string]string{
 			"@vitejs/plugin-react": "^4.2.1",
-			"vite":                "^5.2.0",
+			"vite":                 "^5.2.0",
 		},
 	}
 	pkgJSON, err := json.MarshalIndent(pkg, "", "  ")
@@ -561,14 +561,14 @@ a:hover { text-decoration: underline; }
 `
 
 	files := map[string][]byte{
-		filepath.Join(dir, "package.json"):      append(pkgJSON, '\n'),
-		filepath.Join(dir, "vite.config.js"):    []byte(viteConfig),
-		filepath.Join(dir, "index.html"):        []byte(indexHTML),
-		filepath.Join(dir, "README.md"):         []byte(readme),
-		filepath.Join(dir, ".gitignore"):        []byte(gitignore),
-		filepath.Join(dir, "src", "main.jsx"):   []byte(mainJSX),
-		filepath.Join(dir, "src", "App.jsx"):    []byte(appJSX),
-		filepath.Join(dir, "src", "index.css"):  []byte(css),
+		filepath.Join(dir, "package.json"):     append(pkgJSON, '\n'),
+		filepath.Join(dir, "vite.config.js"):   []byte(viteConfig),
+		filepath.Join(dir, "index.html"):       []byte(indexHTML),
+		filepath.Join(dir, "README.md"):        []byte(readme),
+		filepath.Join(dir, ".gitignore"):       []byte(gitignore),
+		filepath.Join(dir, "src", "main.jsx"):  []byte(mainJSX),
+		filepath.Join(dir, "src", "App.jsx"):   []byte(appJSX),
+		filepath.Join(dir, "src", "index.css"): []byte(css),
 	}
 
 	created := make([]string, 0, len(files))

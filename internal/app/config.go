@@ -21,14 +21,17 @@ const (
 var SupportedModels = []string{DefaultModel, ModelGLM5, ModelMiniMaxM25CodingPlan}
 
 type Config struct {
-	APIKey            string `yaml:"eai_api_key"`
-	BaseURL           string `yaml:"base_url"`
-	Model             string `yaml:"model"`
-	MaxTokens         int    `yaml:"max_tokens"`
-	MaxParallelAgents int    `yaml:"max_parallel_agents"`
-	DefaultMode       string `yaml:"mode"`
-	SafeMode          bool   `yaml:"safe_mode"`
-	Installed         bool   `yaml:"installed"`
+	APIKey    string `yaml:"eai_api_key"`
+	BaseURL   string `yaml:"base_url"`
+	Model     string `yaml:"model"`
+	MaxTokens int    `yaml:"max_tokens"`
+	// ContextWindowTokens is the model's maximum context window size (input tokens).
+	// Used for session memory compaction thresholds.
+	ContextWindowTokens int    `yaml:"context_window_tokens"`
+	MaxParallelAgents   int    `yaml:"max_parallel_agents"`
+	DefaultMode         string `yaml:"mode"`
+	SafeMode            bool   `yaml:"safe_mode"`
+	Installed           bool   `yaml:"installed"`
 
 	// TUI / chat UX preferences.
 	ChatVerbosity string `yaml:"chat_verbosity"` // compact|balanced|detailed
@@ -90,14 +93,19 @@ func decodeConfig(data []byte, cfg *Config) error {
 }
 
 func DefaultConfig() Config {
+	contextTokens := 0
+	if n, ok := LookupContextWindowTokens(DefaultModel); ok {
+		contextTokens = n
+	}
 	return Config{
-		BaseURL:           DefaultBaseURL,
-		Model:             DefaultModel,
-		MaxTokens:         32768,
-		MaxParallelAgents: 50,
-		DefaultMode:       "orchestrate",
-		SafeMode:          true,
-		Installed:         false,
+		BaseURL:             DefaultBaseURL,
+		Model:               DefaultModel,
+		MaxTokens:           32768,
+		ContextWindowTokens: contextTokens,
+		MaxParallelAgents:   50,
+		DefaultMode:         "orchestrate",
+		SafeMode:            true,
+		Installed:           false,
 
 		ChatVerbosity: "compact",
 		ShowBanner:    false,
@@ -144,6 +152,11 @@ func LoadConfig(path string) (Config, error) {
 	cfg.Permissions = NormalizePermissionsMode(cfg.Permissions)
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 32768
+	}
+	if cfg.ContextWindowTokens <= 0 {
+		if n, ok := LookupContextWindowTokens(cfg.Model); ok {
+			cfg.ContextWindowTokens = n
+		}
 	}
 	if cfg.MaxParallelAgents <= 0 {
 		cfg.MaxParallelAgents = 50

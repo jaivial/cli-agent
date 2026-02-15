@@ -9,11 +9,11 @@ import (
 )
 
 type TaskShard struct {
-	ID     string
-	Index  int
-	Total  int
+	ID      string
+	Index   int
+	Total   int
 	Subtask string
-	Prompt string
+	Prompt  string
 }
 
 type TaskResult struct {

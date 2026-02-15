@@ -9,7 +9,10 @@ import (
 )
 
 func TestMemoryStoreCreateAndLoadSessionForWorkDir(t *testing.T) {
-	store := NewMemoryStore(t.TempDir())
+	store, err := NewSQLiteSessionStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("sqlite store: %v", err)
+	}
 	workDir := t.TempDir()
 
 	sess, err := store.CreateSession(workDir)
@@ -63,7 +66,7 @@ func TestEstimateSessionWorkDurationUsesActiveWindows(t *testing.T) {
 }
 
 func TestMemoryStoreSaveAndLoadPromptHistory(t *testing.T) {
-	store := NewMemoryStore(t.TempDir())
+	store := NewFileSessionStore(t.TempDir())
 	workDir := t.TempDir()
 
 	in := []string{
@@ -89,7 +92,7 @@ func TestMemoryStoreSaveAndLoadPromptHistory(t *testing.T) {
 }
 
 func TestMemoryStoreLoadPromptHistorySupportsRawArray(t *testing.T) {
-	store := NewMemoryStore(t.TempDir())
+	store := NewFileSessionStore(t.TempDir())
 	workDir := t.TempDir()
 
 	projectID, _, err := store.projectID(workDir)

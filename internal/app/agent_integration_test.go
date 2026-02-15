@@ -32,7 +32,7 @@ func TestAgentLoop_SimpleExecution(t *testing.T) {
 	}
 	// In mock mode, the task should complete (either via Completed flag or reaching max iterations)
 	if !state.Completed && state.Iteration < state.MaxLoops {
-		t.Errorf("Expected task to complete or reach max loops, got iteration %d/%d, completed=%v", 
+		t.Errorf("Expected task to complete or reach max loops, got iteration %d/%d, completed=%v",
 			state.Iteration, state.MaxLoops, state.Completed)
 	}
 }

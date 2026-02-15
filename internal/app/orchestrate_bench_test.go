@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -81,7 +83,7 @@ func orchestrateLatencyServer(delays []orchestrateDelay, fallbackDelay time.Dura
 				},
 			},
 		})
-	})
+	}))
 }
 
 func collectOrchestratePhaseMetrics(
@@ -130,10 +132,10 @@ func BenchmarkExecuteOrchestrate_PhaseTiming_TBenchStyle(b *testing.B) {
 	defer server.Close()
 
 	a := &Application{
-		Logger:            NewLogger(&testingWriter{}),
-		Config:            Config{MaxParallelAgents: 2},
-		Client:            &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter:          NewPromptBuilder(),
+		Logger:              NewLogger(&testingWriter{}),
+		Config:              Config{MaxParallelAgents: 2},
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
 		orchestrateCacheTTL: 0,
 	}
 
@@ -179,10 +181,10 @@ func BenchmarkExecuteOrchestrate_PhaseTiming_TBenchRealistic(b *testing.B) {
 	defer server.Close()
 
 	a := &Application{
-		Logger:             NewLogger(&testingWriter{}),
-		Config:             Config{MaxParallelAgents: 2},
-		Client:             &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter:           NewPromptBuilder(),
+		Logger:              NewLogger(&testingWriter{}),
+		Config:              Config{MaxParallelAgents: 2},
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
 		orchestrateCacheTTL: time.Minute,
 	}
 
@@ -228,10 +230,10 @@ func BenchmarkExecuteOrchestrate_TBenchCacheWarmupProfile(b *testing.B) {
 	countedClient := cloneHTTPClientWithCountingTransport(server.Client(), &requestCount)
 
 	a := &Application{
-		Logger:             NewLogger(&testingWriter{}),
-		Config:             Config{MaxParallelAgents: 2},
-		Client:             &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: countedClient, MaxTokens: 32768},
-		Prompter:           NewPromptBuilder(),
+		Logger:              NewLogger(&testingWriter{}),
+		Config:              Config{MaxParallelAgents: 2},
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: countedClient, MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
 		orchestrateCacheTTL: 10 * time.Minute,
 	}
 
@@ -253,6 +255,49 @@ func BenchmarkExecuteOrchestrate_TBenchCacheWarmupProfile(b *testing.B) {
 	}
 }
 
+func BenchmarkExecuteOrchestrate_ActivePanesScaling(b *testing.B) {
+	b.Setenv("EAI_TMUX_DISABLE", "1")
+	b.Setenv("EAI_ORCHESTRATE_MAX_PANES_PER_TASK", "5")
+	b.Setenv("EAI_ORCHESTRATE_MAX_SHARDS", "10")
+
+	server := orchestrateLatencyServer(nil, 15*time.Millisecond)
+	defer server.Close()
+
+	task := `1) subtask one
+2) subtask two
+3) subtask three
+4) subtask four
+5) subtask five
+6) subtask six
+7) subtask seven
+8) subtask eight
+9) subtask nine
+10) subtask ten`
+
+	for _, panes := range []int{1, 2, 5, 10} {
+		b.Run(fmt.Sprintf("panes=%d", panes), func(b *testing.B) {
+			b.Setenv("EAI_ORCHESTRATE_ACTIVE_PANES", strconv.Itoa(panes))
+			a := &Application{
+				Logger:              NewLogger(&testingWriter{}),
+				Config:              Config{MaxParallelAgents: panes},
+				Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+				Prompter:            NewPromptBuilder(),
+				orchestrateCacheTTL: 0,
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				_, err := a.ExecuteOrchestrate(ctx, ModeOrchestrate, task, 2)
+				cancel()
+				if err != nil {
+					b.Fatalf("ExecuteOrchestrate failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
 type roundTripCountingTransport struct {
 	base  http.RoundTripper
 	count *int64
@@ -267,4 +312,3 @@ func (t *roundTripCountingTransport) RoundTrip(req *http.Request) (*http.Respons
 type testingWriter struct{}
 
 func (testingWriter) Write(p []byte) (int, error) { return len(p), nil }
-

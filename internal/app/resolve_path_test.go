@@ -25,4 +25,3 @@ func TestResolvePath_ExpandsHomeAndCommonDirs(t *testing.T) {
 		t.Fatalf("expected absolute path preserved, got %q", got)
 	}
 }
-

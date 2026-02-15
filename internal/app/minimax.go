@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -184,6 +185,71 @@ func (c *MinimaxClient) CompleteWithObserverMeta(ctx context.Context, prompt str
 	return "", CompletionMeta{}, lastErr
 }
 
+// CompleteStreamingWithObserverMeta streams content/reasoning deltas when supported by the provider.
+// Callbacks may be nil. The returned string is the full final content.
+func (c *MinimaxClient) CompleteStreamingWithObserverMeta(
+	ctx context.Context,
+	prompt string,
+	onReasoningDelta func(string),
+	onContentDelta func(string),
+) (string, CompletionMeta, error) {
+	// Mock mode check
+	if c.APIKey == "mock" || c.BaseURL == "mock://" {
+		out, err := c.mockComplete(ctx, prompt)
+		return out, CompletionMeta{FinishReason: "stop"}, err
+	}
+
+	if c.APIKey == "" {
+		return "", CompletionMeta{}, ErrAPIKeyRequired
+	}
+
+	maxRetries := 2
+	if v := strings.TrimSpace(os.Getenv("EAI_LLM_MAX_RETRIES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			maxRetries = n
+		}
+	}
+
+	reqTimeout := 180 * time.Second
+	if v := strings.TrimSpace(os.Getenv("EAI_LLM_REQUEST_TIMEOUT_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			reqTimeout = time.Duration(n) * time.Second
+		}
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return "", CompletionMeta{}, ctx.Err()
+		}
+
+		reqCtx := ctx
+		var cancel context.CancelFunc
+		if reqTimeout > 0 {
+			reqCtx, cancel = context.WithTimeout(ctx, reqTimeout)
+		}
+
+		out, meta, err := c.completeZAiChatCompletionsStreamingMeta(reqCtx, prompt, onReasoningDelta, onContentDelta)
+		if cancel != nil {
+			cancel()
+		}
+
+		if err == nil {
+			return out, meta, nil
+		}
+		lastErr = err
+		if attempt == maxRetries || !isRetryableLLMError(err) {
+			break
+		}
+		backoff := time.Duration(1<<attempt) * time.Second
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
+		time.Sleep(backoff)
+	}
+	return "", CompletionMeta{}, lastErr
+}
+
 func isRetryableLLMError(err error) bool {
 	if err == nil {
 		return false
@@ -338,6 +404,235 @@ func (c *MinimaxClient) completeZAiChatCompletionsMeta(ctx context.Context, prom
 		return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format: %s", summary)
 	}
 	return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format")
+}
+
+func extractZAiDeltaMeta(choices []zaiChatCompletionChoice) (contentDelta string, reasoningDelta string, finishReason string) {
+	fr := ""
+	var content strings.Builder
+	var reasoning strings.Builder
+	for _, ch := range choices {
+		if fr == "" && strings.TrimSpace(ch.FinishReason) != "" {
+			fr = strings.TrimSpace(ch.FinishReason)
+		}
+		if ch.Delta != nil {
+			if strings.TrimSpace(ch.Delta.ReasoningContent) != "" {
+				reasoning.WriteString(ch.Delta.ReasoningContent)
+			}
+			if strings.TrimSpace(ch.Delta.Content) != "" {
+				content.WriteString(ch.Delta.Content)
+			}
+		}
+	}
+	return content.String(), reasoning.String(), fr
+}
+
+func (c *MinimaxClient) completeZAiChatCompletionsStreamingMeta(
+	ctx context.Context,
+	prompt string,
+	onReasoningDelta func(string),
+	onContentDelta func(string),
+) (string, CompletionMeta, error) {
+	url := zaiChatCompletionsURL(c.BaseURL)
+	reqBody := zaiChatCompletionRequest{
+		Model:       c.Model,
+		Messages:    []zaiChatMessage{{Role: "user", Content: prompt}},
+		Temperature: 0.2,
+		Stream:      true,
+		MaxTokens:   c.MaxTokens,
+	}
+
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", CompletionMeta{}, err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return "", CompletionMeta{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept-Language", "en-US,en")
+	request.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.HTTP.Do(request)
+	if err != nil {
+		return "", CompletionMeta{}, fmt.Errorf("api request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Fast-path non-stream responses (some providers ignore stream=true).
+	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	if resp.StatusCode >= 300 || !strings.Contains(contentType, "text/event-stream") {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", CompletionMeta{}, fmt.Errorf("failed to read response: %v", readErr)
+		}
+		if resp.StatusCode >= 300 {
+			// Reuse existing non-stream error parsing logic.
+			var openaiErr zaiChatCompletionResponse
+			if err := json.Unmarshal(bodyBytes, &openaiErr); err == nil && openaiErr.Error != nil && openaiErr.Error.Message != "" {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, openaiErr.Error.Message)
+			}
+			var wrapped struct {
+				Code    int    `json:"code,omitempty"`
+				Message string `json:"message,omitempty"`
+				Error   *struct {
+					Message string `json:"message"`
+				} `json:"error,omitempty"`
+			}
+			if err := json.Unmarshal(bodyBytes, &wrapped); err == nil {
+				if wrapped.Error != nil && wrapped.Error.Message != "" {
+					return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Error.Message)
+				}
+				if wrapped.Message != "" {
+					return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, wrapped.Message)
+				}
+			}
+			if msg := extractErrorMessageFromBody(bodyBytes); msg != "" {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d, message: %s", resp.StatusCode, msg)
+			}
+			return "", CompletionMeta{}, fmt.Errorf("z.ai api error: status %d", resp.StatusCode)
+		}
+
+		var respDirect zaiChatCompletionResponse
+		if err := json.Unmarshal(bodyBytes, &respDirect); err == nil {
+			if respDirect.Error != nil {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respDirect.Error.Message)
+			}
+			content, reasoning, finishReason := extractZAiChoiceContentMeta(respDirect.Choices)
+			if strings.TrimSpace(reasoning) != "" && onReasoningDelta != nil {
+				onReasoningDelta(reasoning)
+			}
+			if strings.TrimSpace(content) != "" {
+				if onContentDelta != nil {
+					onContentDelta(content)
+				}
+				return content, CompletionMeta{FinishReason: finishReason}, nil
+			}
+		}
+
+		var respWrapped struct {
+			Code    int                       `json:"code,omitempty"`
+			Message string                    `json:"message,omitempty"`
+			Data    zaiChatCompletionResponse `json:"data"`
+			Error   *struct{ Message string } `json:"error,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &respWrapped); err == nil {
+			if respWrapped.Error != nil && respWrapped.Error.Message != "" {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respWrapped.Error.Message)
+			}
+			if respWrapped.Data.Error != nil && respWrapped.Data.Error.Message != "" {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: %s", respWrapped.Data.Error.Message)
+			}
+			content, reasoning, finishReason := extractZAiChoiceContentMeta(respWrapped.Data.Choices)
+			if strings.TrimSpace(reasoning) != "" && onReasoningDelta != nil {
+				onReasoningDelta(reasoning)
+			}
+			if strings.TrimSpace(content) != "" {
+				if onContentDelta != nil {
+					onContentDelta(content)
+				}
+				return content, CompletionMeta{FinishReason: finishReason}, nil
+			}
+			if respWrapped.Message != "" && respWrapped.Code != 0 {
+				return "", CompletionMeta{}, fmt.Errorf("z.ai api error: code %d, message: %s", respWrapped.Code, respWrapped.Message)
+			}
+		}
+
+		if summary := summarizeResponseBody(bodyBytes, 240); summary != "" && !strings.HasPrefix(summary, "{") && !strings.HasPrefix(summary, "[") {
+			return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format: %s", summary)
+		}
+		return "", CompletionMeta{}, fmt.Errorf("invalid z.ai api response format")
+	}
+
+	var out strings.Builder
+	finishReason := ""
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		if ctx.Err() != nil {
+			return out.String(), CompletionMeta{FinishReason: finishReason}, ctx.Err()
+		}
+
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return out.String(), CompletionMeta{FinishReason: finishReason}, err
+		}
+
+		line = strings.TrimRight(line, "\r\n")
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		if payload == "[DONE]" {
+			break
+		}
+
+		// Try OpenAI-style payload first.
+		var chunk zaiChatCompletionResponse
+		if err := json.Unmarshal([]byte(payload), &chunk); err == nil {
+			if chunk.Error != nil && strings.TrimSpace(chunk.Error.Message) != "" {
+				return out.String(), CompletionMeta{FinishReason: finishReason}, fmt.Errorf("z.ai api error: %s", chunk.Error.Message)
+			}
+
+			cDelta, rDelta, fr := extractZAiDeltaMeta(chunk.Choices)
+			if fr != "" && finishReason == "" {
+				finishReason = fr
+			}
+			if strings.TrimSpace(rDelta) != "" && onReasoningDelta != nil {
+				onReasoningDelta(rDelta)
+			}
+			if strings.TrimSpace(cDelta) != "" {
+				out.WriteString(cDelta)
+				if onContentDelta != nil {
+					onContentDelta(cDelta)
+				}
+			}
+			continue
+		}
+
+		// Then try {data:{choices:...}} wrapper payload.
+		var wrapped struct {
+			Data  zaiChatCompletionResponse `json:"data"`
+			Error *struct{ Message string } `json:"error,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(payload), &wrapped); err == nil {
+			if wrapped.Error != nil && strings.TrimSpace(wrapped.Error.Message) != "" {
+				return out.String(), CompletionMeta{FinishReason: finishReason}, fmt.Errorf("z.ai api error: %s", wrapped.Error.Message)
+			}
+			if wrapped.Data.Error != nil && strings.TrimSpace(wrapped.Data.Error.Message) != "" {
+				return out.String(), CompletionMeta{FinishReason: finishReason}, fmt.Errorf("z.ai api error: %s", wrapped.Data.Error.Message)
+			}
+
+			cDelta, rDelta, fr := extractZAiDeltaMeta(wrapped.Data.Choices)
+			if fr != "" && finishReason == "" {
+				finishReason = fr
+			}
+			if strings.TrimSpace(rDelta) != "" && onReasoningDelta != nil {
+				onReasoningDelta(rDelta)
+			}
+			if strings.TrimSpace(cDelta) != "" {
+				out.WriteString(cDelta)
+				if onContentDelta != nil {
+					onContentDelta(cDelta)
+				}
+			}
+			continue
+		}
+	}
+
+	final := strings.TrimSpace(out.String())
+	if final == "" {
+		return "", CompletionMeta{FinishReason: finishReason}, fmt.Errorf("empty completion")
+	}
+	return out.String(), CompletionMeta{FinishReason: finishReason}, nil
 }
 
 func extractZAiChoiceContent(choices []zaiChatCompletionChoice) (content string, reasoning string) {

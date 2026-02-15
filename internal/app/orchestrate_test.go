@@ -10,11 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync"
 	"reflect"
 	"strings"
-	"testing"
+	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 )
 
@@ -171,6 +171,7 @@ func TestSynthesizeResults_IncludesErrors(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_UsesUpToTwoParallelShards(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var active int32
 	var maxActive int32
 	var reqCount int32
@@ -204,10 +205,11 @@ func TestExecuteOrchestrate_UsesUpToTwoParallelShards(t *testing.T) {
 	defer server.Close()
 
 	a := &Application{
-		Config:   Config{MaxParallelAgents: 2},
-		Logger:   NewLogger(&bytes.Buffer{}),
-		Client:   &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter: NewPromptBuilder(),
+		Config:              Config{MaxParallelAgents: 2},
+		Logger:              NewLogger(&bytes.Buffer{}),
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
+		orchestrateCacheTTL: time.Minute,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -232,6 +234,7 @@ func TestExecuteOrchestrate_UsesUpToTwoParallelShards(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_UsesExpandedTwoByFiveShardBudget(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var active int32
 	var maxActive int32
 	var reqCount int32
@@ -300,6 +303,7 @@ func TestExecuteOrchestrate_UsesExpandedTwoByFiveShardBudget(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_RespectsConfiguredMaxParallel(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var active int32
 	var maxActive int32
 	var reqCount int32
@@ -326,7 +330,7 @@ func TestExecuteOrchestrate_RespectsConfiguredMaxParallel(t *testing.T) {
 				},
 			},
 		})
-	})
+	}))
 
 	defer server.Close()
 
@@ -380,6 +384,14 @@ func TestSplitTaskForOrchestration_AvoidsFragileConnectors(t *testing.T) {
 	}
 }
 
+func TestSplitTaskForOrchestration_SplitsSentences(t *testing.T) {
+	got := splitTaskForOrchestration("Bootstrap service. Run tests. Validate build.", 5)
+	want := []string{"Bootstrap service", "Run tests", "Validate build"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitTaskForOrchestration = %#v, want %#v", got, want)
+	}
+}
+
 func TestCanRunOrchestrateShardsInTmux(t *testing.T) {
 	tmp := t.TempDir()
 	tm := filepath.Join(tmp, "tmux")
@@ -387,6 +399,12 @@ func TestCanRunOrchestrateShardsInTmux(t *testing.T) {
 	if err := os.WriteFile(tm, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake tmux: %v", err)
 	}
+
+	// Ensure the behavior here is not affected by whether the developer happens to be
+	// running tests inside a tmux session.
+	t.Setenv("TMUX", "")
+	t.Setenv("EAI_TMUX_WORKER", "")
+	t.Setenv("EAI_TMUX_DISABLE", "")
 
 	a := &Application{}
 	if a.canRunOrchestrateShardsInTmux() {
@@ -418,47 +436,47 @@ func TestExecuteOrchestrate_UsesTmuxWorkersWhenAvailable(t *testing.T) {
 	tm := filepath.Join(tmp, "tmux")
 	logPath := filepath.Join(tmp, "tmux.log")
 
-	script := "#!/bin/sh
+	script := `#!/bin/sh
 set -eu
-log_file=\"${EAI_TMUX_LOG:-/dev/null}\"
+log_file="${EAI_TMUX_LOG:-/dev/null}"
 
-if [ \"$1\" = \"split-window\" ]; then
-  prev=\"\"
-  shard=\"\"
-  result_file=\"\"
-  for arg in \"$@\"; do
-    if [ \"$prev\" = \"--shard-id\" ]; then
-      shard=\"$arg\"
-      prev=\"\"
+if [ "$1" = "split-window" ]; then
+  prev=""
+  shard=""
+  result_file=""
+  for arg in "$@"; do
+    if [ "$prev" = "--shard-id" ]; then
+      shard="$arg"
+      prev=""
       continue
     fi
-    if [ \"$prev\" = \"--result-file\" ]; then
-      result_file=\"$arg\"
-      prev=\"\"
+    if [ "$prev" = "--result-file" ]; then
+      result_file="$arg"
+      prev=""
       continue
     fi
-    case \"$arg\" in
+    case "$arg" in
       --shard-id|--result-file)
-        prev=\"$arg\"
+        prev="$arg"
         ;;
     esac
   done
-  printf '%s\\n' \"split:${shard}\" >> \"$log_file\"
-  if [ -n \"$result_file\" ]; then
-    printf '%s' \"{\\\"shard_id\\\":\\\"${shard}\\\",\\\"attempt\\\":1,\\\"output\\\":\\\"tmux result ${shard}\\\",\\\"duration_ms\\\":5}\" > \"$result_file\"
+  printf '%s\n' "split:${shard}" >> "$log_file"
+  if [ -n "$result_file" ]; then
+    printf '%s' "{\"shard_id\":\"${shard}\",\"attempt\":1,\"output\":\"tmux result ${shard}\",\"duration_ms\":5}" > "$result_file"
   fi
-  printf '%%0%s\n' \"$shard\"
+  printf '%%0%s\n' "$shard"
   exit 0
 fi
 
-if [ \"$1\" = \"kill-pane\" ]; then
-  printf '%s\\n' \"kill:${3:-}\" >> \"$log_file\"
+if [ "$1" = "kill-pane" ]; then
+  printf '%s\n' "kill:${3:-}" >> "$log_file"
   exit 0
 fi
 
-echo \"unsupported tmux command: $1\" >&2
+echo "unsupported tmux command: $1" >&2
 exit 1
-"
+`
 	if err := os.WriteFile(tm, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake tmux script: %v", err)
 	}
@@ -470,9 +488,9 @@ exit 1
 	t.Setenv("EAI_TMUX_DISABLE", "")
 
 	a := &Application{
-		Logger:  NewLogger(&bytes.Buffer{}),
-		Client:  &MinimaxClient{APIKey: "mock", Model: DefaultModel, BaseURL: "mock://", MaxTokens: 32768},
-		Config:  Config{MaxParallelAgents: 2},
+		Logger:   NewLogger(&bytes.Buffer{}),
+		Client:   &MinimaxClient{APIKey: "mock", Model: DefaultModel, BaseURL: "mock://", MaxTokens: 32768},
+		Config:   Config{MaxParallelAgents: 2},
 		Prompter: NewPromptBuilder(),
 	}
 
@@ -539,6 +557,7 @@ func TestOrchestrateCacheKeyUsesSubtaskContext(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_ProgressPhases(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var events []ProgressEvent
 	var eventsMu sync.Mutex
 
@@ -579,10 +598,11 @@ func TestExecuteOrchestrate_ProgressPhases(t *testing.T) {
 	defer server.Close()
 
 	a := &Application{
-		Config:   Config{MaxParallelAgents: 2},
-		Logger:   NewLogger(&bytes.Buffer{}),
-		Client:   &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter: NewPromptBuilder(),
+		Config:              Config{MaxParallelAgents: 2},
+		Logger:              NewLogger(&bytes.Buffer{}),
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
+		orchestrateCacheTTL: time.Minute,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -610,11 +630,11 @@ func TestExecuteOrchestrate_ProgressPhases(t *testing.T) {
 		kinds[ev.Kind]++
 	}
 	required := map[string]bool{
-		"orchestrate_split":    false,
-		"orchestrate_schedule": false,
-		"orchestrate_llm":      false,
+		"orchestrate_split":      false,
+		"orchestrate_schedule":   false,
+		"orchestrate_llm":        false,
 		"orchestrate_shard_done": false,
-		"orchestrate_synthesis": false,
+		"orchestrate_synthesis":  false,
 	}
 	for _, ev := range snapshot {
 		if _, ok := required[ev.Kind]; ok {
@@ -668,6 +688,7 @@ func TestExecuteOrchestrate_ProgressPhases(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_SyncEmitsAfterAllShardCompletions(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var events []ProgressEvent
 	var eventsMu sync.Mutex
 
@@ -687,10 +708,11 @@ func TestExecuteOrchestrate_SyncEmitsAfterAllShardCompletions(t *testing.T) {
 	defer server.Close()
 
 	a := &Application{
-		Config:   Config{MaxParallelAgents: 2},
-		Logger:   NewLogger(&bytes.Buffer{}),
-		Client:   &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter: NewPromptBuilder(),
+		Config:              Config{MaxParallelAgents: 2},
+		Logger:              NewLogger(&bytes.Buffer{}),
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
+		orchestrateCacheTTL: time.Minute,
 	}
 
 	input := `- scan repository
@@ -738,6 +760,7 @@ func TestExecuteOrchestrate_SyncEmitsAfterAllShardCompletions(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_CachePerSubtask(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
 	var requestCount int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -764,14 +787,15 @@ func TestExecuteOrchestrate_CachePerSubtask(t *testing.T) {
 				},
 			},
 		})
-	})
+	}))
 	defer server.Close()
 
 	a := &Application{
-		Config:   Config{MaxParallelAgents: 2},
-		Logger:   NewLogger(&bytes.Buffer{}),
-		Client:   &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
-		Prompter: NewPromptBuilder(),
+		Config:              Config{MaxParallelAgents: 2},
+		Logger:              NewLogger(&bytes.Buffer{}),
+		Client:              &MinimaxClient{APIKey: "k", Model: DefaultModel, BaseURL: server.URL, HTTP: server.Client(), MaxTokens: 32768},
+		Prompter:            NewPromptBuilder(),
+		orchestrateCacheTTL: time.Minute,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -803,6 +827,8 @@ func TestExecuteOrchestrate_CachePerSubtask(t *testing.T) {
 }
 
 func TestExecuteOrchestrate_PredictiveRetry_OnlyFailedShardRetries(t *testing.T) {
+	t.Setenv("EAI_TMUX_DISABLE", "1")
+	t.Setenv("EAI_LLM_MAX_RETRIES", "0")
 	var mu sync.Mutex
 	var calls []string
 	var slowFinish time.Time
@@ -862,7 +888,7 @@ func TestExecuteOrchestrate_PredictiveRetry_OnlyFailedShardRetries(t *testing.T)
 				},
 			},
 		})
-	})
+	}))
 	defer server.Close()
 
 	a := &Application{

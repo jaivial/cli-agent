@@ -426,19 +426,28 @@ type ToolResult struct {
 }
 
 type ProgressEvent struct {
-	Kind       string    `json:"kind"`
-	Text       string    `json:"text"`
-	Tool       string    `json:"tool,omitempty"`
-	ToolCallID string    `json:"tool_call_id,omitempty"`
-	ToolStatus string    `json:"tool_status,omitempty"`
-	Path       string    `json:"path,omitempty"`
-	Command    string    `json:"command,omitempty"`
-	ChangeType string    `json:"change_type,omitempty"`
-	OldContent string    `json:"old_content,omitempty"`
-	NewContent string    `json:"new_content,omitempty"`
-	DurationMs int64     `json:"duration_ms,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	At         time.Time `json:"at,omitempty"`
+	Kind       string `json:"kind"`
+	Text       string `json:"text"`
+	// CompanionLabel identifies which companion (if any) emitted this event.
+	CompanionLabel string `json:"companion_label,omitempty"`
+	CompanionID    string `json:"companion_id,omitempty"`
+	CompanionIndex int    `json:"companion_index,omitempty"`
+	CompanionTotal int    `json:"companion_total,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolStatus string `json:"tool_status,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Command    string `json:"command,omitempty"`
+	ChangeType string `json:"change_type,omitempty"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	// ActiveCompanions shows how many worker slots/shards are running right now.
+	ActiveCompanions int `json:"active_companions,omitempty"`
+	// MaxCompanions reports the orchestrator worker ceiling for the current run.
+	MaxCompanions int       `json:"max_companions,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	At            time.Time `json:"at,omitempty"`
 }
 
 type AgentState struct {
@@ -463,9 +472,12 @@ type AgentMessage struct {
 }
 
 type AgentLoop struct {
-	Client                 *MinimaxClient
-	Tools                  []Tool
-	MaxLoops               int
+	Client   *MinimaxClient
+	Tools    []Tool
+	MaxLoops int
+	// Relentless, when true, keeps iterating until completion or ctx cancellation.
+	// MaxLoops is still recorded in state for observability, but not treated as a hard stop.
+	Relentless             bool
 	StateDir               string
 	WorkDir                string
 	Logger                 *Logger
@@ -480,6 +492,10 @@ type AgentLoop struct {
 	// PermissionsMode controls approval behavior for risky actions and elevation retries.
 	PermissionsMode     string
 	PermissionDecisions <-chan PermissionDecision
+
+	// ToolCallFilter, when set, can deny a tool call at execution time (after parsing).
+	// This is used to enforce read-only companion agents, etc.
+	ToolCallFilter func(call ToolCall) (allowed bool, reason string)
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -758,8 +774,16 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 	truncationContinueAttempts := 0
 	maxTruncationContinueAttempts := 2
 
+	maxIter := l.MaxLoops
+	if maxIter <= 0 {
+		maxIter = 10
+	}
+	if l.Relentless {
+		maxIter = int(^uint(0) >> 1) // effectively unbounded; rely on ctx cancel.
+	}
+
 loop:
-	for state.Iteration < l.MaxLoops {
+	for state.Iteration < maxIter {
 		l.saveState(state)
 
 		if state.Iteration == 0 {
@@ -985,6 +1009,22 @@ loop:
 					"attempts": consecutiveNoAction,
 				})
 				l.emitProgress(ProgressEvent{Kind: "warn", Text: "Too many consecutive no-action responses"})
+				if l.Relentless {
+					// In relentless mode, don't stop: force a hard reset instruction and continue.
+					reset := "RESET REQUIRED: You are not returning JSON tool calls.\n" +
+						"1) Re-read the task and pick the single best NEXT tool action.\n" +
+						"2) Output ONLY one valid JSON tool call. No prose.\n" +
+						"Recommended first step: {\"tool\":\"list_dir\",\"args\":{\"path\":\".\"}}\n"
+					state.Messages = append(state.Messages, AgentMessage{
+						Role:      "user",
+						Content:   reset,
+						Timestamp: time.Now(),
+					})
+					consecutiveNoAction = 0
+					state.Iteration++
+					continue
+				}
+
 				state.FinalOutput = "Model did not return any tool calls after repeated prompts"
 				break
 			}
@@ -1057,7 +1097,10 @@ loop:
 	state.EndedAt = time.Now()
 
 	if !state.Completed && state.FinalOutput == "" {
-		state.FinalOutput = fmt.Sprintf("Task did not complete within %d iterations", l.MaxLoops)
+		// Avoid user-facing iteration-limit messages; callers may choose to retry/continue.
+		if !l.Relentless {
+			state.FinalOutput = fmt.Sprintf("AGENT_STEP_LIMIT_REACHED (%d iterations)", l.MaxLoops)
+		}
 	}
 	state.FinalOutput = RedactSecrets(state.FinalOutput, l.apiKeyForRedaction())
 	l.saveState(state)
@@ -1648,8 +1691,20 @@ func runShellCommandWithSudo(ctx context.Context, shell string, shellArgs []stri
 	if _, lookErr := exec.LookPath("sudo"); lookErr != nil {
 		return nil, nil, false
 	}
-	sudoArgs := append([]string{"-n", shell}, shellArgs...)
+
+	sudoPassword := strings.TrimSpace(os.Getenv("EAI_DESKTOP_SUDO_PASSWORD"))
+	var sudoArgs []string
+	if sudoPassword == "" {
+		sudoArgs = append([]string{"-n", shell}, shellArgs...)
+	} else {
+		// Use stdin-driven sudo to honor the password captured by the desktop app.
+		sudoArgs = append([]string{"-S", shell}, shellArgs...)
+	}
+
 	cmd := exec.CommandContext(ctx, "sudo", sudoArgs...)
+	if sudoPassword != "" {
+		cmd.Stdin = strings.NewReader(sudoPassword + "\n")
+	}
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
 	}
@@ -2341,6 +2396,22 @@ func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) 
 		}
 		l.emitToolProgress(call, "error", 0, errText)
 		return result
+	}
+	if l.ToolCallFilter != nil {
+		if ok, reason := l.ToolCallFilter(call); !ok {
+			errText := strings.TrimSpace(reason)
+			if errText == "" {
+				errText = "Tool call blocked by policy"
+			}
+			result := ToolResult{
+				ToolCallID: call.ID,
+				Success:    false,
+				Error:      errText,
+				DurationMs: 0,
+			}
+			l.emitToolProgress(call, "error", 0, errText)
+			return result
+		}
 	}
 
 	// Capture before/after file contents for UI-only diff rendering.

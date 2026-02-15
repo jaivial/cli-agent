@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+  <!-- Horse body -->
+  <ellipse cx="200" cy="180" rx="100" ry="50" fill="#8B4513"/>
+  
+  <!-- Horse neck and head -->
+  <path d="M280,160 Q300,120 320,100 Q340,90 350,110 Q340,130 320,150 Q300,170 280,160 Z" fill="#8B4513"/>
+  
+  <!-- Horse ear -->
+  <path d="M330,105 Q340,80 345,85 Q340,100 330,105 Z" fill="#8B4513"/>
+  
+  <!-- Eye -->
+  <circle cx="340" cy="115" r="4" fill="black"/>
+  
+  <!-- Mane -->
+  <path d="M280,155 Q275,130 280,105 Q285,130 280,155" fill="#5D3A1A"/>
+  <path d="M290,145 Q285,120 290,95 Q295,120 290,145" fill="#5D3A1A"/>
+  <path d="M300,135 Q295,115 300,90 Q305,115 300,135" fill="#5D3A1A"/>
+  
+  <!-- Front legs -->
+  <rect x="250" y="210" width="15" height="60" fill="#8B4513" rx="3"/>
+  <rect x="270" y="210" width="15" height="60" fill="#8B4513" rx="3"/>
+  
+  <!-- Back legs -->
+  <rect x="130" y="210" width="15" height="55" fill="#8B4513" rx="3"/>
+  <rect x="150" y="210" width="15" height="55" fill="#8B4513" rx="3"/>
+  
+  <!-- Hooves -->
+  <rect x="248" y="265" width="19" height="10" fill="#4A3520" rx="2"/>
+  <rect x="268" y="265" width="19" height="10" fill="#4A3520" rx="2"/>
+  <rect x="128" y="260" width="19" height="10" fill="#4A3520" rx="2"/>
+  <rect x="148" y="260" width="19" height="10" fill="#4A3520" rx="2"/>
+  
+  <!-- Tail -->
+  <path d="M100,180 Q60,170 40,200 Q70,190 90,195 Q55,195 35,220 Q65,205 85,210 Q60,220 45,250 Q70,230 90,235" fill="#5D3A1A"/>
+</svg>

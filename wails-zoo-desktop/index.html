@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐴 Horse Haven Farm</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        nav {
+            background: rgba(0,0,0,0.3);
+            padding: 1rem 2rem;
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+        nav .logo {
+            font-size: 1.5rem;
+            color: white;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        nav .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+        nav .nav-links a {
+            color: white;
+            text-decoration: none;
+            transition: color 0.3s;
+            font-weight: 500;
+        }
+        nav .nav-links a:hover, nav .nav-links a.active {
+            color: #ffd700;
+        }
+        main {
+            padding-top: 80px;
+            min-height: 100vh;
+        }
+        .page {
+            display: none;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .page.active {
+            display: block;
+        }
+        .hero {
+            text-align: center;
+            color: white;
+            padding: 4rem 2rem;
+        }
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .hero p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        .section-title {
+            color: white;
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .card {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-10px);
+        }
+        .card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+        .card-content {
+            padding: 1.5rem;
+        }
+        .card h3 {
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        .card p {
+            color: #666;
+            line-height: 1.6;
+        }
+        .svg-farm {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .svg-horse {
+            background: rgba(255,255,255,0.9);
+            border-radius: 15px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .svg-horse svg {
+            width: 100%;
+            max-width: 180px;
+        }
+        .svg-horse h4 {
+            color: #333;
+            margin-top: 0.5rem;
+        }
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .gallery-item {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        .gallery-item img {
+            width: 100%;
+            height: 250px;
+            object-fit: cover;
+            transition: transform 0.3s;
+        }
+        .gallery-item:hover img {
+            transform: scale(1.1);
+        }
+        .gallery-caption {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 0.5rem 1rem;
+        }
+        .about-section, .contact-section {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 2rem;
+            margin-top: 2rem;
+        }
+        .contact-form {
+            max-width: 500px;
+            margin: 2rem auto;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.8rem 2rem;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.3s;
+        }
+        .btn:hover {
+            transform: scale(1.05);
+        }
+        footer {
+            text-align: center;
+            color: white;
+            padding: 2rem;
+            background: rgba(0,0,0,0.3);
+        }
+        @media (max-width: 768px) {
+            nav .nav-links {
+                gap: 1rem;
+            }
+            nav .nav-links a {
+                font-size: 0.9rem;
+            }
+            .hero h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="#home" class="logo">🐴 Horse Haven</a>
+        <ul class="nav-links">
+            <li><a href="#home" data-route="home">Home</a></li>
+            <li><a href="#farm" data-route="farm">Farm</a></li>
+            <li><a href="#gallery" data-route="gallery">Gallery</a></li>
+            <li><a href="#about" data-route="about">About</a></li>
+            <li><a href="#contact" data-route="contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <main>
+        <!-- Home Page -->
+        <div id="home" class="page active">
+            <div class="hero">
+                <h1>Welcome to Horse Haven Farm</h1>
+                <p>Discover the beauty and majesty of these magnificent creatures</p>
+            </div>
+            <div class="card-grid">
+                <div class="card">
+                    <img src="https://images.unsplash.com/photo-1553284965-83fd3e82fa5a?w=400&h=300&fit=crop" alt="Wild Horse">
+                    <div class="card-content">
+                        <h3>Wild & Free</h3>
+                        <p>Experience the untamed beauty of horses in their natural habitat.</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <img src="https://images.unsplash.com/photo-1449157291145-7efd050a4d0e?w=400&h=300&fit=crop" alt="Horse Running">
+                    <div class="card-content">
+                        <h3>Grace in Motion</h3>
+                        <p>Watch horses run with breathtaking speed and elegance.</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <img src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=300&fit=crop" alt="Horse Portrait">
+                    <div class="card-content">
+                        <h3>Noble Companions</h3>
+                        <p>Horses have been our faithful partners for thousands of years.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Farm Page with 5 SVG Horses -->
+        <div id="farm" class="page">
+            <h2 class="section-title">🏠 Meet Our Farm Horses</h2>
+            <div class="svg-farm">
+                <!-- SVG Horse 1 - Brown Stallion -->
+                <div class="svg-horse">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="100" cy="130" rx="60" ry="30" fill="#8B4513"/>
+                        <ellipse cx="100" cy="100" rx="45" ry="35" fill="#8B4513"/>
+                        <circle cx="75" cy="85" r="20" fill="#8B4513"/>
+                        <ellipse cx="85" cy="80" rx="8" ry="6" fill="white"/>
+                        <circle cx="87" cy="80" r="3" fill="black"/>
+                        <polygon points="55,70 45,55 50,75" fill="#8B4513"/>
+                        <path d="M60,75 Q50,60 55,50" stroke="#654321" stroke-width="4" fill="none"/>
+                        <rect x="80" y="140" width="8" height="50" fill="#8B4513"/>
+                        <rect x="95" y="140" width="8" height="50" fill="#8B4513"/>
+                        <rect x="110" y="140" width="8" height="45" fill="#8B4513"/>
+                        <rect x="50" y="135" width="8" height="40" fill="#8B4513"/>
+                        <rect x="52" y="175" width="14" height="8" fill="#333"/>
+                        <rect x="82" y="190" width="14" height="8" fill="#333"/>
+                        <rect x="97" y="190" width="14" height="8" fill="#333"/>
+                        <rect x="112" y="185" width="14" height="8" fill="#333"/>
+                        <path d="M140,100 Q160,90 155,110" stroke="#654321" stroke-width="5" fill="none"/>
+                    </svg>
+                    <h4>Thunder - Brown Stallion</h4>
+                </div>
+
+                <!-- SVG Horse 2 - White Mare -->
+                <div class="svg-horse">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="100" cy="130" rx="55" ry="28" fill="#f5f5f5"/>
+                        <ellipse cx="100" cy="100" rx="42" ry="33" fill="#f5f5f5"/>
+                        <circle cx="78" cy="87" r="18" fill="#f5f5f5"/>
+                        <ellipse cx="86" cy="82" rx="7" ry="5" fill="white"/>
+                        <circle cx="88" cy="82" r="2.5" fill="black"/>
+                        <polygon points="58,72 48,58 53,77" fill="#f5f5f5"/>
+                        <path d="M62,77 Q52,62 57,52" stroke="#ddd" stroke-width="4" fill="none"/>
+                        <rect x="82" y="138" width="7" height="48" fill="#f5f5f5"/>
+                        <rect x="96" y="138" width="7" height="48" fill="#f5f5f5"/>
+                        <rect x="108" y="138" width="7" height="43" fill="#f5f5f5"/>
+                        <rect x="52" y="133" width="7" height="38" fill="#f5f5f5"/>
+                        <rect x="54" y="171" width="12" height="7" fill="#666"/>
+                        <rect x="84" y="186" width="12" height="7" fill="#666"/>
+                        <rect x="98" y="186" width="12" height="7" fill="#666"/>
+                        <rect x="110" y="181" width="12" height="7" fill="#666"/>
+                        <path d="M135,98 Q155,88 150,108" stroke="#ddd" stroke-width="5" fill="none"/>
+                        <circle cx="95" cy="95" r="3" fill="#ffb6c1"/>
+                    </svg>
+                    <h4>Snowdrop - White Mare</h4>
+                </div>
+
+                <!-- SVG Horse 3 - Black Foal -->
+                <div class="svg-horse">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="100" cy="135" rx="45" ry="25" fill="#1a1a1a"/>
+                        <ellipse cx="100" cy="108" rx="38" ry="30" fill="#1a1a1a"/>
+                        <circle cx="80" cy="95" r="16" fill="#1a1a1a"/>
+                        <ellipse cx="87" cy="91" rx="6" ry="5" fill="white"/>
+                        <circle cx="88" cy="91" r="2" fill="black"/>
+                        <polygon points="60,78 52,66 55,82" fill="#1a1a1a"/>
+                        <path d="M63,83 Q55,70 58,62" stroke="#333" stroke-width="3" fill="none"/>
+                        <rect x="85" y="140" width="6" height="42" fill="#1a1a1a"/>
+                        <rect x="97" y="140" width="6" height="42" fill="#1a1a1a"/>
+                        <rect x="55" y="137" width="6" height="35" fill="#1a1a1a"/>
+                        <rect x="85" y="182" width="10" height="6" fill="#444"/>
+                        <rect x="97" y="182" width="10" height="6" fill="#444"/>
+                        <rect x="57" y="172" width="10" height="6" fill="#444"/>
+                        <ellipse cx="100" cy="80" rx="25" ry="15" fill="#1a1a1a"/>
+                        <path d="M125,88 Q130,78 135,88" stroke="#333" stroke-width="4" fill="none"/>
+                    </svg>
+                    <h4>Midnight - Black Foal</h4>
+                </div>
+
+                <!-- SVG Horse 4 - Golden Palomino -->
+                <div class="svg-horse">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="100" cy="128" rx="58" ry="29" fill="#DAA520"/>
+                        <ellipse cx="100" cy="98" rx="44" ry="34" fill="#DAA520"/>
+                        <circle cx="76" cy="83" r="19" fill="#DAA520"/>
+                        <ellipse cx="85" cy="78" rx="7" ry="6" fill="white"/>
+                        <circle cx="87" cy="78" r="3" fill="black"/>
+                        <polygon points="54,68 44,52 50,73" fill="#DAA520"/>
+                        <path d="M58,73 Q48,57 54,47" stroke="#B8860B" stroke-width="4" fill="none"/>
+                        <rect x="81" y="137" width="8" height="49" fill="#DAA520"/>
+                        <rect x="96" y="137" width="8" height="49" fill="#DAA520"/>
+                        <rect x="111" y="137" width="8" height="44" fill="#DAA520"/>
+                        <rect x="50" y="132" width="8" height="39" fill="#DAA520"/>
+                        <rect x="52" y="186" width="14" height="8" fill="#8B4513"/>
+                        <rect x="83" y="186" width="14" height="8" fill="#8B4513"/>
+                        <rect x="98" y="186" width="14" height="8" fill="#8B4513"/>
+                        <rect x="113" y="181" width="14" height="8" fill="#8B4513"/>
+                        <path d="M138,98 Q158,88 153,108" stroke="#B8860B" stroke-width="5" fill="none"/>
+                        <ellipse cx="100" cy="70" rx="30" ry="18" fill="#FFD700"/>
+                    </svg>
+                    <h4>Sunshine - Golden Palomino</h4>
+                </div>
+
+                <!-- SVG Horse 5 - Spotted Pony -->
+                <div class="svg-horse">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="100" cy="132" rx="52" ry="26" fill="#f5f5dc"/>
+                        <ellipse cx="100" cy="102" rx="40" ry="32" fill="#f5f5dc"/>
+                        <circle cx="77" cy="87" r="18" fill="#f5f5dc"/>
+                        <ellipse cx="85" cy="82" rx="7" ry="5" fill="white"/>
+                        <circle cx="87" cy="82" r="2.5" fill="black"/>
+                        <polygon points="56,72 46,58 51,76" fill="#f5f5dc"/>
+                        <path d="M60,77 Q50,62 55,52" stroke="#8B4513" stroke-width="4" fill="none"/>
+                        <rect x="83" y="138" width="7" height="47" fill="#f5f5dc"/>
+                        <rect x="97" y="138" width="7" height="47" fill="#f5f5dc"/>
+                        <rect x="109" y="138" width="7" height="42" fill="#f5f5dc"/>
+                        <rect x="53" y="133" width="7" height="37" fill="#f5f5dc"/>
+                        <rect x="55" y="185" width="13" height="7" fill="#555"/>
+                        <rect x="85" y="185" width="13" height="7" fill="#555"/>
+                        <rect x="99" y="185" width="13" height="7" fill="#555"/>
+                        <rect x="111" y="180" width="13" height="7" fill="#555"/>
+                        <circle cx="90" cy="100" r="8" fill="#8B4513"/>
+                        <circle cx="110" cy="110" r="6" fill="#8B4513"/>
+                        <circle cx="85" cy="115" r="5" fill="#8B4513"/>
+                        <circle cx="105" cy="95" r="7" fill="#8B4513"/>
+                        <ellipse cx="75" cy="55" rx="12" ry="10" fill="#8B4513"/>
+                        <path d="M133,100 Q153,90 148,110" stroke="#8B4513" stroke-width="5" fill="none"/>
+                    </svg>
+                    <h4>Speckles - Spotted Pony</h4>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gallery Page -->
+        <div id="gallery" class="page">
+            <h2 class="section-title">🖼️ Horse Gallery</h2>
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=300&fit=crop" alt="Horse Close-up">
+                    <div class="gallery-caption">Majestic Portrait</div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1534773728080-33d31da27ae5?w=400&h=300&fit=crop" alt="Horses in Field">
+                    <div class="gallery-caption">Pasture Friends</div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1509914398892-963f53e6e2f1?w=400&h=300&fit=crop" alt="Horse Running">
+                    <div class="gallery-caption">Freedom Run</div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1598974357801-cbca100e65d3?w=400&h=300&fit=crop" alt="Horse and Rider">
+                    <div class="gallery-caption">Partnership</div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400&h=300&fit=crop" alt="Horse Head">
+                    <div class="gallery-caption">Gentle Giant</div>
+                </div>
+                <div class="gallery-item">
+                    <img src="https://images.unsplash.com/photo-1528145768435-890186dd51c9?w=400&h=300&fit=crop" alt="Wild Horses">
+                    <div class="gallery-caption">Wild Spirit</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Page -->
+        <div id="about" class="page">
+            <h2 class="section-title">📖 About Horse Haven</h2>
+            <div class="about-section">
+                <h3>Our Mission</h3>
+                <p style="margin: 1rem 0; line-height: 1.8;">At Horse Haven Farm, we are dedicated to the care, preservation, and celebration of these magnificent animals. Our farm has been a sanctuary for horses for over 25 years, providing them with love, proper care, and a forever home.</p>
+                
+                <h3 style="margin-top: 2rem;">What We Do</h3>
+                <ul style="margin: 1rem 0; line-height: 1.8; padding-left: 2rem;">
+                    <li>Rescue and rehabilitate horses in need</li>
+                    <li>Educational programs for horse enthusiasts</li>
+                    <li>Therapeutic riding sessions</li>
+                    <li>Breeding preservation of rare horse breeds</li>
+                    <li>Community outreach and events</li>
+                </ul>
+                
+                <h3 style="margin-top: 2rem;">Our History</h3>
+                <p style="margin: 1rem 0; line-height: 1.8;">Founded in 1998 by the Thompson family, Horse Haven started with just two rescued horses. Today, we're home to over 30 horses, each with their own unique story and personality. Our 50-acre property provides ample space for grazing, training, and simply being a horse.</p>
+            </div>
+        </div>
+
+        <!-- Contact Page -->
+        <div id="contact" class="page">
+            <h2 class="section-title">📞 Contact Us</h2>
+            <div class="contact-section">
+                <p style="text-align: center; margin-bottom: 2rem;">We'd love to hear from you! Whether you're interested in adoption, volunteering, or just want to learn more about horses.</p>
+                <form class="contact-form" onsubmit="handleSubmit(event)">
+                    <div class="form-group">
+                        <label for="name">Your Name</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="subject">Subject</label>
+                        <input type="text" id="subject" name="subject" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="message">Message</label>
+                        <textarea id="message" name="message" rows="5" required></textarea>
+                    </div>
+                    <button type="submit" class="btn">Send Message</button>
+                </form>
+                <div style="text-align: center; margin-top: 2rem; color: #333;">
+                    <p>📍 123 Horse Farm Lane, Green Valley, CA 90210</p>
+                    <p>📧 info@horsehavenfarm.com</p>
+                    <p>📱 (555) 123-HORS</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>© 2024 Horse Haven Farm. All rights reserved. | Made with ❤️ for horses</p>
+    </footer>
+
+    <script>
+        // Router class for handling hash-based routing
+        class Router {
+            constructor() {
+                this.routes = {};
+                this.currentRoute = null;
+                window.addEventListener('hashchange', () => this.handleRoute());
+                window.addEventListener('load', () => this.handleRoute());
+            }
+
+            register(path, handler) {
+                this.routes[path] = handler;
+            }
+
+            handleRoute() {
+                const hash = window.location.hash.slice(1) || 'home';
+                const handler = this.routes[hash];
+                
+                if (handler) {
+                    this.currentRoute = hash;
+                    handler(hash);
+                } else {
+                    // Default to home if route not found
+                    window.location.hash = 'home';
+                }
+            }
+
+            navigate(path) {
+                window.location.hash = path;
+            }
+        }
+
+        // Initialize router
+        const router = new Router();
+
+        // Route handler function
+        function handleNavigation(route) {
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+
+            // Remove active class from all nav links
+            document.querySelectorAll('.nav-links a').forEach(link => {
+                link.classList.remove('active');
+            });
+
+            // Show selected page
+            const targetPage = document.getElementById(route);
+            if (targetPage) {
+                targetPage.classList.add('active');
+                // Scroll to top of page
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            // Set active nav link
+            const activeLink = document.querySelector(`.nav-links a[data-route="${route}"]`);
+            if (activeLink) {
+                activeLink.classList.add('active');
+            }
+        }
+
+        // Register routes
+        router.register('home', handleNavigation);
+        router.register('farm', handleNavigation);
+        router.register('gallery', handleNavigation);
+        router.register('about', handleNavigation);
+        router.register('contact', handleNavigation);
+
+        // Form submission handler
+        function handleSubmit(event) {
+            event.preventDefault();
+            const formData = {
+                name: document.getElementById('name').value,
+                email: document.getElementById('email').value,
+                subject: document.getElementById('subject').value,
+                message: document.getElementById('message').value
+            };
+            
+            alert('Thank you for your message, ' + formData.name + '! We\'ll get back to you soon.');
+            event.target.reset();
+        }
+
+        // Handle initial route
+        handleNavigation(window.location.hash.slice(1) || 'home');
+
+        // Smooth scroll behavior for navigation
+        document.querySelectorAll('.nav-links a').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const route = link.getAttribute('data-route');
+                router.navigate(route);
+            });
+        });
+    </script>
+</body>
+</html>
