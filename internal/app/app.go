@@ -1668,9 +1668,40 @@ func buildCompanionDiscoveryTasks(task string, n int, runID string) []string {
 	if n <= 1 {
 		return []string{task}
 	}
-	assignments := companionAssignmentCatalog(task)
+
+	// Use the raw request for role selection, but keep the full task (may include wrapper
+	// context) as the companion's task body for continuity.
+	catalogTask := task
+	if _, request, _, ok := splitToolSessionContextWrapper(task); ok {
+		if trimmed := strings.TrimSpace(request); trimmed != "" {
+			catalogTask = trimmed
+		}
+	}
+	assignments := companionAssignmentCatalog(catalogTask)
 	if len(assignments) == 0 {
 		assignments = []companionAssignment{{Scope: "discovery", Focus: "Inspect the repo and summarize relevant findings."}}
+	}
+
+	teamMap := ""
+	{
+		var tb strings.Builder
+		tb.WriteString("Team map (avoid overlap):\n")
+		for i := 0; i < n; i++ {
+			asn := assignments[i%len(assignments)]
+			scope := strings.TrimSpace(asn.Scope)
+			if scope == "" {
+				scope = "scope"
+			}
+			if i >= len(assignments) {
+				scope = fmt.Sprintf("%s-%d", scope, i+1)
+			}
+			focus := strings.TrimSpace(asn.Focus)
+			if focus == "" {
+				focus = "Inspect and summarize useful findings."
+			}
+			tb.WriteString(fmt.Sprintf("- Companion %d: %s | %s\n", i+1, scope, focus))
+		}
+		teamMap = strings.TrimSpace(tb.String())
 	}
 
 	out := make([]string, 0, n)
@@ -1700,11 +1731,17 @@ func buildCompanionDiscoveryTasks(task string, n int, runID string) []string {
 		b.WriteString(strings.TrimSpace(asn.Focus))
 		b.WriteString("\n\n")
 
+		if teamMap != "" {
+			b.WriteString(teamMap)
+			b.WriteString("\n\n")
+		}
+
 		if runID != "" {
 			b.WriteString("Collaboration rules:\n")
 			b.WriteString("- First, call collab.poll (run_id, since_id=0) and read the coordinator assignments.\n")
 			b.WriteString("- Claim your scope with collab.claim before doing any deep work.\n")
 			b.WriteString("- Before deeply reading a file, claim it as scope file:<path> and post what you're extracting.\n")
+			b.WriteString("- If a file/grep/search scope is claimed by someone else, ask the owner for the snippet (collab.post kind=question) instead of retrying.\n")
 			if !strings.Contains(strings.ToLower(scope), "repo") {
 				b.WriteString("- Prefer asking the repo-discovery companion for file snippets instead of rereading core files.\n")
 			}
@@ -1856,7 +1893,36 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 	if maxBudget > 20 {
 		maxBudget = 20
 	}
-	companionCount := orchestrateDesiredShardCount(maxBudget, task, 2)
+
+	// Score the raw request, not the injected wrapper context, so we don't accidentally
+	// over/under-spawn companions.
+	scoreTask := task
+	if _, request, _, ok := splitToolSessionContextWrapper(task); ok {
+		if trimmed := strings.TrimSpace(request); trimmed != "" {
+			scoreTask = trimmed
+		}
+	}
+
+	companionCount := orchestrateDesiredShardCount(maxBudget, scoreTask, 2)
+	// Nudge companion spawning more aggressively for multi-step/product tasks so we
+	// actually get parallelism benefits.
+	score := orchestrateComplexityScore(scoreTask)
+	words := countOrchestrateWords(scoreTask)
+	minDesired := 2
+	switch {
+	case maxBudget >= 12 && (score >= 9 || words >= 80):
+		minDesired = minInt(maxBudget, 12)
+	case maxBudget >= 8 && (score >= 6 || words >= 40):
+		minDesired = minInt(maxBudget, 8)
+	case maxBudget >= 6 && (score >= 4 || words >= 25):
+		minDesired = minInt(maxBudget, 6)
+	case maxBudget >= 4 && (score >= 2 || words >= 15):
+		minDesired = minInt(maxBudget, 4)
+	}
+	if companionCount < minDesired {
+		companionCount = minDesired
+	}
+
 	if companionCount > maxBudget {
 		companionCount = maxBudget
 	}
@@ -1878,7 +1944,7 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 			if rid, err := collab.StartRun(ctx, "", sessionID); err == nil {
 				runID = strings.TrimSpace(rid)
 				// Post coordinator assignments so companions can see each other's scopes.
-				assignments := companionAssignmentCatalog(task)
+				assignments := companionAssignmentCatalog(scoreTask)
 				if len(assignments) == 0 {
 					assignments = []companionAssignment{{Scope: "discovery", Focus: "Inspect the repo and summarize relevant findings."}}
 				}
@@ -2000,6 +2066,7 @@ func (a *Application) ExecuteAgentTaskInSessionWithCompanions(
 			defer cancel()
 
 			scope := parseCompanionScopeFromTask(tasks[i])
+			agent.CollabScope = scope
 			if strings.TrimSpace(runID) != "" && agent.Collab != nil && strings.TrimSpace(scope) != "" {
 				claimer := strings.TrimSpace(agent.CollabAgentName)
 				if claimer == "" {
@@ -2493,8 +2560,29 @@ func collectCollabTranscript(ctx context.Context, collab CollabStore, runID stri
 	return out
 }
 
-func buildCollaborativeShardPrompt(runID string, agentName string, scope string, wave int, index int, total int, subtask string, fullTask string, extraContext string) string {
+func extractCollabHeadersFromPrompt(prompt string) (runID, sessionID, scope string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", "", ""
+	}
+	lines := strings.Split(prompt, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		switch {
+		case line == "COLLAB RUN:" && runID == "" && i+1 < len(lines):
+			runID = strings.TrimSpace(lines[i+1])
+		case line == "SESSION ID:" && sessionID == "" && i+1 < len(lines):
+			sessionID = strings.TrimSpace(lines[i+1])
+		case strings.HasPrefix(line, "SCOPE") && scope == "" && i+1 < len(lines):
+			scope = strings.TrimSpace(lines[i+1])
+		}
+	}
+	return strings.TrimSpace(runID), strings.TrimSpace(sessionID), strings.TrimSpace(scope)
+}
+
+func buildCollaborativeShardPrompt(runID string, sessionID string, agentName string, scope string, wave int, index int, total int, subtask string, fullTask string, extraContext string) string {
 	runID = strings.TrimSpace(runID)
+	sessionID = strings.TrimSpace(sessionID)
 	agentName = strings.TrimSpace(agentName)
 	scope = strings.TrimSpace(scope)
 	subtask = strings.TrimSpace(subtask)
@@ -2504,6 +2592,9 @@ func buildCollaborativeShardPrompt(runID string, agentName string, scope string,
 	var b strings.Builder
 	b.WriteString("COLLAB RUN:\n")
 	b.WriteString(runID)
+	b.WriteString("\n")
+	b.WriteString("SESSION ID:\n")
+	b.WriteString(sessionID)
 	b.WriteString("\n")
 	b.WriteString("YOU ARE:\n")
 	b.WriteString(agentName)
@@ -2516,6 +2607,8 @@ func buildCollaborativeShardPrompt(runID string, agentName string, scope string,
 	b.WriteString("- Start by calling collab.poll(run_id, since_id=0) to see coordinator assignments and other agent updates.\n")
 	b.WriteString("- Claim your scope with collab.claim(run_id, scope, from_agent) before deep work.\n")
 	b.WriteString("- Before deeply reading a file, claim it as scope file:<path> and post what you're extracting.\n")
+	b.WriteString("- Use collab.post with kind=status|question|answer|handoff and keep messages short (new deltas only).\n")
+	b.WriteString("- If a file/grep/search scope is claimed by another agent, ask the owner for the snippet instead of redoing the same work.\n")
 	b.WriteString("- Post progress and findings with collab.post so other agents avoid duplicating work.\n")
 	b.WriteString("- If you detect overlap, ask the relevant agent via collab.post(kind=question) instead of repeating work.\n")
 	b.WriteString("- DO NOT modify files.\n\n")
@@ -2665,7 +2758,7 @@ func (a *Application) ExecuteOrchestrateInSessionWithProgressEvents(
 				Index:   i,
 				Total:   len(waveTasks),
 				Subtask: t,
-				Prompt:  buildCollaborativeShardPrompt(runID, agentName, scope, wave, i+1, len(waveTasks), t, input, extraContext),
+				Prompt:  buildCollaborativeShardPrompt(runID, sessionID, agentName, scope, wave, i+1, len(waveTasks), t, input, extraContext),
 			})
 		}
 
@@ -3341,6 +3434,19 @@ func (a *Application) executeOrchestrateShardInTmuxWithMeta(ctx context.Context,
 	// tmux panes inherit the tmux server environment, not this process env. Provide
 	// critical env vars explicitly so workers can read API keys and config overrides.
 	tmuxArgs = append(tmuxArgs, "-e", "EAI_TMUX_WORKER=1")
+	collabRunID, collabSessionID, collabScope := extractCollabHeadersFromPrompt(prompt)
+	forceAgentWorker := strings.TrimSpace(collabRunID) != ""
+	// Collaborative shards coordinate via the collab bus (claims + handoffs). Provide
+	// defaults via env vars so tool calls can omit scope/run/session safely.
+	if forceAgentWorker {
+		tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("EAI_COLLAB_RUN_ID=%s", strings.TrimSpace(collabRunID)))
+		if strings.TrimSpace(collabSessionID) != "" {
+			tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("EAI_COLLAB_SESSION_ID=%s", strings.TrimSpace(collabSessionID)))
+		}
+		if strings.TrimSpace(collabScope) != "" {
+			tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("EAI_COLLAB_SCOPE=%s", strings.TrimSpace(collabScope)))
+		}
+	}
 	// Provide a stable per-pane agent name for collab tool defaults.
 	tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("EAI_COLLAB_AGENT=Companion %s", strings.TrimSpace(shard.ID)))
 	for _, name := range []string{
@@ -3361,6 +3467,11 @@ func (a *Application) executeOrchestrateShardInTmuxWithMeta(ctx context.Context,
 		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			tmuxArgs = append(tmuxArgs, "-e", fmt.Sprintf("%s=%s", name, v))
 		}
+	}
+	// Ensure collaborative shards always use the read-only tool agent worker, even if
+	// the server env has a different value (tmux "-e" uses last assignment).
+	if forceAgentWorker {
+		tmuxArgs = append(tmuxArgs, "-e", "EAI_ORCHESTRATE_AGENT_WORKER=1")
 	}
 	target := strings.TrimSpace(os.Getenv("EAI_TMUX_TARGET"))
 	if target == "" {
@@ -3444,15 +3555,18 @@ func (a *Application) completeOrchestrateShardWithMeta(ctx context.Context, prom
 		return a.executeOrchestrateShardInTmuxWithMeta(ctx, prompt, shard, attempt, progress)
 	}
 
-	// When the desktop enables collaborative shards, run a read-only tool agent in-process
-	// as a fallback when tmux isn't available.
-	if strings.TrimSpace(os.Getenv("EAI_ORCHESTRATE_AGENT_WORKER")) == "1" && orchestrateCollabEnabled() {
+	// Collaborative shards must run as read-only tool agents so they can coordinate via the
+	// collab bus. This is the non-tmux fallback path.
+	if runID, sessionID, scope := extractCollabHeadersFromPrompt(prompt); strings.TrimSpace(runID) != "" && a.collabStore() != nil {
 		start := time.Now()
 
 		stateDir := filepath.Join(os.TempDir(), "cli-agent", "states")
 		agent := NewAgentLoop(a.Client, 25, stateDir, a.Logger)
 		agent.Relentless = true
 		agent.Collab = a.collabStore()
+		agent.CollabRunID = strings.TrimSpace(runID)
+		agent.CollabSessionID = strings.TrimSpace(sessionID)
+		agent.CollabScope = strings.TrimSpace(scope)
 		agent.CollabAgentName = fmt.Sprintf("Companion %s", strings.TrimSpace(shard.ID))
 		agent.Tools = companionTools()
 		agent.SystemMessageBuilder = func(_ string) string {
@@ -3487,6 +3601,16 @@ func (a *Application) completeOrchestrateShardWithMeta(ctx context.Context, prom
 				ev.CompanionTotal = compTotal
 				progress(ev)
 			}
+		}
+
+		// Claim + mark this shard as active so other agents don't duplicate work.
+		if agent.Collab != nil && agent.CollabRunID != "" && agent.CollabScope != "" {
+			claimer := strings.TrimSpace(agent.CollabAgentName)
+			if claimer == "" {
+				claimer = compLabel
+			}
+			_, _, _ = agent.Collab.ClaimScope(ctx, agent.CollabRunID, agent.CollabScope, claimer, 2*time.Minute)
+			_, _ = agent.Collab.PostMessage(ctx, agent.CollabRunID, agent.CollabSessionID, claimer, "", "status", agent.CollabScope, "starting")
 		}
 
 		state, err := agent.Execute(ctx, prompt)
@@ -3741,6 +3865,31 @@ func orchestrateComplexityScore(input string) int {
 		{token: "nextjs", weight: 2},
 		{token: "tailwind", weight: 1},
 		{token: "wails", weight: 2},
+		{token: "website", weight: 3},
+		{token: "landing page", weight: 2},
+		{token: "portfolio", weight: 2},
+		{token: "html", weight: 1},
+		{token: "css", weight: 1},
+		{token: "javascript", weight: 1},
+		{token: "animation", weight: 2},
+		{token: "animations", weight: 2},
+		{token: "design", weight: 2},
+		{token: "redesign", weight: 2},
+		{token: "branding", weight: 2},
+		{token: "rebrand", weight: 3},
+		{token: "copywriting", weight: 2},
+		{token: "professional", weight: 2},
+		{token: "curated", weight: 1},
+		{token: "web", weight: 2},
+		{token: "sitio web", weight: 3},
+		{token: "pagina web", weight: 3},
+		{token: "página web", weight: 3},
+		{token: "diseno", weight: 2},
+		{token: "diseño", weight: 2},
+		{token: "profesional", weight: 2},
+		{token: "animacion", weight: 2},
+		{token: "animación", weight: 2},
+		{token: "animaciones", weight: 2},
 
 		{token: "backend", weight: 3},
 		{token: "api", weight: 2},
@@ -3823,7 +3972,7 @@ func orchestrateDesiredShardCount(maxBudget int, input string, baseCount int) in
 	// heuristic (e.g. non-English requirements dumps).
 	desiredByWords := 0
 	if words > 0 {
-		desiredByWords = minInt(maxBudget, maxInt(2, words/20))
+		desiredByWords = minInt(maxBudget, maxInt(2, words/15))
 	}
 
 	desired := maxInt(desiredByScore, desiredByWords)

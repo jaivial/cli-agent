@@ -9,6 +9,23 @@ import (
 	"time"
 )
 
+func normalizeCollabKind(kind string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	switch kind {
+	case "":
+		return ""
+	case "announce", "status", "question", "answer", "handoff", "decision":
+		return kind
+	default:
+		// Keep unknown kinds, but normalize spacing/case.
+		return kind
+	}
+}
+
+func normalizeCollabScope(scope string) string {
+	return strings.TrimSpace(scope)
+}
+
 func (s *SQLiteSessionStore) StartRun(ctx context.Context, runID string, sessionID string) (string, error) {
 	if s == nil {
 		return "", errors.New("collab store unavailable")
@@ -76,7 +93,67 @@ func (s *SQLiteSessionStore) PostMessage(ctx context.Context, runID string, sess
 	if err != nil {
 		return 0, err
 	}
+
+	kind = normalizeCollabKind(kind)
+	scope = normalizeCollabScope(scope)
+
+	// Keep the shared chat lightweight. The detailed, streaming reasoning belongs in
+	// per-pane output; collab is for decisions and handoffs.
+	const maxBody = 2200
+	if len(body) > maxBody {
+		body = strings.TrimSpace(body[:maxBody-3]) + "..."
+	}
+
+	// Apply basic role rules to prevent cross-talk loops:
+	// - Only the coordinator should broadcast ANNOUNCE/DECISION.
+	if (kind == "announce" || kind == "decision") && !strings.HasPrefix(fromAgent, "Coordinator") {
+		return 0, fmt.Errorf("collab: %s messages are coordinator-only", kind)
+	}
+
+	// For most message kinds, require that the sender owns the scope claim. This avoids
+	// multiple agents "arguing" in the same channel and redoing work.
+	if kind != "" && kind != "announce" && kind != "status" && kind != "question" {
+		if scope == "" {
+			return 0, errors.New("collab: scope is required for this message kind")
+		}
+		var owner string
+		var expires sql.NullInt64
+		err := db.QueryRowContext(ctx, `SELECT claimed_by, expires_at_ns FROM collab_claims WHERE run_id = ? AND scope = ?`, runID, scope).
+			Scan(&owner, &expires)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, errors.New("collab: scope is unclaimed; claim it before posting")
+			}
+			return 0, err
+		}
+		owner = strings.TrimSpace(owner)
+		nowNS := time.Now().UnixNano()
+		if expires.Valid && expires.Int64 > 0 && expires.Int64 < nowNS {
+			return 0, errors.New("collab: scope claim expired; claim it before posting")
+		}
+		if owner == "" || owner != fromAgent {
+			return 0, fmt.Errorf("collab: scope is claimed by %q (not %q)", owner, fromAgent)
+		}
+	}
+
 	now := time.Now().UnixNano()
+
+	// Deduplicate fast repeats (common when models "double send" or retry).
+	{
+		const dedupeWindow = 10 * time.Second
+		since := time.Now().Add(-dedupeWindow).UnixNano()
+		var existingID int64
+		if err := db.QueryRowContext(
+			ctx,
+			`SELECT id FROM collab_messages
+			 WHERE run_id = ? AND from_agent = ? AND IFNULL(kind,'') = ? AND IFNULL(scope,'') = ? AND body = ? AND created_at_ns >= ?
+			 ORDER BY id DESC LIMIT 1`,
+			runID, fromAgent, kind, scope, body, since,
+		).Scan(&existingID); err == nil && existingID > 0 {
+			return existingID, nil
+		}
+	}
+
 	res, err := db.ExecContext(
 		ctx,
 		`INSERT INTO collab_messages(run_id, session_id, from_agent, to_agent, kind, scope, body, created_at_ns)
@@ -204,7 +281,7 @@ func (s *SQLiteSessionStore) ClaimScope(ctx context.Context, runID string, scope
 		   claimed_by=excluded.claimed_by,
 		   claimed_at_ns=excluded.claimed_at_ns,
 		   expires_at_ns=excluded.expires_at_ns
-		 WHERE collab_claims.expires_at_ns IS NOT NULL AND collab_claims.expires_at_ns < ?`,
+		 WHERE collab_claims.claimed_by = excluded.claimed_by OR (collab_claims.expires_at_ns IS NOT NULL AND collab_claims.expires_at_ns < ?)`,
 		runID, scope, claimedBy, nowNS, expiresNS, nowNS,
 	)
 	if err != nil {

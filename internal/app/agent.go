@@ -503,6 +503,9 @@ type AgentLoop struct {
 	CollabRunID     string
 	CollabSessionID string
 	CollabAgentName string
+	// CollabScope, when set, is the primary scope/channel for this agent. It is used
+	// for claim heartbeats and as a fallback for collab tool calls.
+	CollabScope string
 }
 
 func NewAgentLoop(client *MinimaxClient, maxLoops int, stateDir string, logger *Logger) *AgentLoop {
@@ -823,6 +826,46 @@ func (l *AgentLoop) Execute(ctx context.Context, task string) (*AgentState, erro
 		Timestamp: time.Now(),
 	}
 	state.Messages = append(state.Messages, userMsg)
+
+	// Keep the agent's primary collab scope claimed for the duration of this run so
+	// other agents don't steal it mid-flight and duplicate work.
+	stopHeartbeat := func() {}
+	if l.Collab != nil {
+		runID := strings.TrimSpace(l.CollabRunID)
+		if runID == "" {
+			runID = strings.TrimSpace(os.Getenv("EAI_COLLAB_RUN_ID"))
+		}
+		scope := strings.TrimSpace(l.CollabScope)
+		if scope == "" {
+			scope = strings.TrimSpace(os.Getenv("EAI_COLLAB_SCOPE"))
+		}
+		from := strings.TrimSpace(l.CollabAgentName)
+		if from == "" {
+			from = strings.TrimSpace(os.Getenv("EAI_COLLAB_AGENT"))
+		}
+		if from == "" {
+			from = "Agent"
+		}
+		if runID != "" && scope != "" {
+			ttl := 2 * time.Minute
+			_, _, _ = l.Collab.ClaimScope(ctx, runID, scope, from, ttl)
+			hbCtx, cancel := context.WithCancel(ctx)
+			stopHeartbeat = cancel
+			go func() {
+				ticker := time.NewTicker(45 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-hbCtx.Done():
+						return
+					case <-ticker.C:
+						_, _, _ = l.Collab.ClaimScope(hbCtx, runID, scope, from, ttl)
+					}
+				}
+			}()
+		}
+	}
+	defer stopHeartbeat()
 
 	// Extract expected output files from task for verification
 	expectedFiles := extractExpectedOutputFiles(task)
@@ -2462,6 +2505,118 @@ func (l *AgentLoop) emitToolProgress(call ToolCall, status string, durationMs in
 	})
 }
 
+func (l *AgentLoop) isReadOnlyToolset() bool {
+	if l == nil {
+		return false
+	}
+	for _, t := range l.Tools {
+		switch t.Name {
+		case "write_file", "edit_file", "append_file", "patch_file":
+			return false
+		}
+	}
+	return true
+}
+
+func (l *AgentLoop) collabAutoClaimForTool(ctx context.Context, call ToolCall) (bool, string) {
+	if l == nil || l.Collab == nil {
+		return true, ""
+	}
+
+	runID := strings.TrimSpace(l.CollabRunID)
+	if runID == "" {
+		runID = strings.TrimSpace(os.Getenv("EAI_COLLAB_RUN_ID"))
+	}
+	if runID == "" {
+		return true, ""
+	}
+
+	agent := strings.TrimSpace(l.CollabAgentName)
+	if agent == "" {
+		agent = strings.TrimSpace(os.Getenv("EAI_COLLAB_AGENT"))
+	}
+	if agent == "" {
+		agent = "Agent"
+	}
+
+	ttl := 2 * time.Minute
+	scope := ""
+	switch call.Name {
+	case "read_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		p := strings.TrimSpace(args.Path)
+		if p == "" {
+			return true, ""
+		}
+		abs := strings.TrimSpace(l.resolvePath(p))
+		if abs == "" {
+			abs = p
+		}
+		scope = "file:" + abs
+	case "grep":
+		var args struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		p := strings.TrimSpace(args.Path)
+		pat := strings.TrimSpace(args.Pattern)
+		if p == "" || pat == "" {
+			return true, ""
+		}
+		abs := strings.TrimSpace(l.resolvePath(p))
+		if abs == "" {
+			abs = p
+		}
+		scope = "grep:" + pat + "@" + abs
+	case "search_files":
+		var args struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+		}
+		_ = json.Unmarshal(call.Arguments, &args)
+		p := strings.TrimSpace(args.Path)
+		pat := strings.TrimSpace(args.Pattern)
+		if p == "" || pat == "" {
+			return true, ""
+		}
+		abs := strings.TrimSpace(l.resolvePath(p))
+		if abs == "" {
+			abs = p
+		}
+		scope = "search:" + pat + "@" + abs
+	default:
+		return true, ""
+	}
+
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return true, ""
+	}
+
+	claimed, owner, err := l.Collab.ClaimScope(ctx, runID, scope, agent, ttl)
+	if err != nil {
+		return true, ""
+	}
+	owner = strings.TrimSpace(owner)
+	if claimed || owner == "" || owner == agent {
+		return true, ""
+	}
+
+	// Avoid duplicated deep reads/searches across companions/shards.
+	if l.isReadOnlyToolset() {
+		switch call.Name {
+		case "read_file", "grep", "search_files":
+			return false, fmt.Sprintf("skipped %s (%s): claimed by %s", call.Name, scope, owner)
+		}
+	}
+
+	return true, ""
+}
+
 func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) ToolResult {
 	if !l.toolNameAllowed(call.Name) {
 		errText := fmt.Sprintf("Tool not allowed in this mode: %s", call.Name)
@@ -2489,6 +2644,21 @@ func (l *AgentLoop) executeToolWithProgress(ctx context.Context, call ToolCall) 
 			l.emitToolProgress(call, "error", 0, errText)
 			return result
 		}
+	}
+
+	if ok, reason := l.collabAutoClaimForTool(ctx, call); !ok {
+		errText := strings.TrimSpace(reason)
+		if errText == "" {
+			errText = "blocked by collab scope ownership"
+		}
+		result := ToolResult{
+			ToolCallID: call.ID,
+			Success:    false,
+			Error:      errText,
+			DurationMs: 0,
+		}
+		l.emitToolProgress(call, "error", 0, errText)
+		return result
 	}
 
 	// Capture before/after file contents for UI-only diff rendering.
@@ -3484,6 +3654,12 @@ func (l *AgentLoop) executeTool(ctx context.Context, call ToolCall) ToolResult {
 		toAgent := strings.TrimSpace(args.ToAgent)
 		kind := strings.TrimSpace(args.Kind)
 		scope := strings.TrimSpace(args.Scope)
+		if scope == "" {
+			scope = strings.TrimSpace(l.CollabScope)
+		}
+		if scope == "" {
+			scope = strings.TrimSpace(os.Getenv("EAI_COLLAB_SCOPE"))
+		}
 		body := strings.TrimSpace(args.Body)
 
 		switch action {

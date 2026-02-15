@@ -373,46 +373,38 @@ func runOrchestrateWorkerCommand() error {
 		// If the prompt includes the coordinator header, set collab defaults and emit
 		// an initial claim/post so other agents can see this shard is active.
 		if loop.Collab != nil {
-			extractHeader := func(s string) (string, string) {
+			extractHeader := func(s string) (string, string, string) {
 				var runID string
+				var sessionID string
 				var scope string
 				lines := strings.Split(s, "\n")
 				for i := 0; i < len(lines); i++ {
 					line := strings.TrimSpace(lines[i])
 					switch {
 					case line == "COLLAB RUN:" && runID == "" && i+1 < len(lines):
-						for j := i + 1; j < len(lines); j++ {
-							next := strings.TrimSpace(lines[j])
-							if next == "" {
-								continue
-							}
-							runID = next
-							break
-						}
+						runID = strings.TrimSpace(lines[i+1])
+					case line == "SESSION ID:" && sessionID == "" && i+1 < len(lines):
+						sessionID = strings.TrimSpace(lines[i+1])
 					case strings.HasPrefix(line, "SCOPE") && scope == "" && i+1 < len(lines):
-						for j := i + 1; j < len(lines); j++ {
-							next := strings.TrimSpace(lines[j])
-							if next == "" {
-								continue
-							}
-							scope = next
-							break
-						}
+						scope = strings.TrimSpace(lines[i+1])
 					}
 				}
-				return strings.TrimSpace(runID), strings.TrimSpace(scope)
+				return strings.TrimSpace(runID), strings.TrimSpace(sessionID), strings.TrimSpace(scope)
 			}
 
-			runID, scope := extractHeader(prompt)
+			runID, sessionID, scope := extractHeader(prompt)
 			if runID != "" {
 				loop.CollabRunID = runID
 			}
+			if sessionID != "" {
+				loop.CollabSessionID = sessionID
+			}
 			if scope != "" {
-				_ = scope
+				loop.CollabScope = scope
 			}
 			if loop.CollabRunID != "" && scope != "" {
 				_, _, _ = loop.Collab.ClaimScope(ctx, loop.CollabRunID, scope, loop.CollabAgentName, 2*time.Minute)
-				_, _ = loop.Collab.PostMessage(ctx, loop.CollabRunID, "", loop.CollabAgentName, "", "status", scope, "starting")
+				_, _ = loop.Collab.PostMessage(ctx, loop.CollabRunID, loop.CollabSessionID, loop.CollabAgentName, "", "status", scope, "starting")
 				if progressWriter != nil {
 					if payload, err := json.Marshal(progressLine{Kind: "collab", Text: fmt.Sprintf("[%s -> *] starting", loop.CollabAgentName)}); err == nil {
 						_, _ = progressWriter.Write(append(payload, '\n'))
